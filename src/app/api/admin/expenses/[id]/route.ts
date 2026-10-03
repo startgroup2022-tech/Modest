@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
 import { expenseSchema, dateOrNull } from '@/lib/admin/schemas';
+import { EXPENSE_TRANSITIONS, canTransition } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,20 +23,35 @@ export const PATCH = adminHandler('expenses.manage', async ({ admin, req }) => {
     const parsed = actionSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: 'Invalid action' }, { status: 422 });
     const { action, approvalNote } = parsed.data;
+    const target = { submit: 'SUBMITTED', approve: 'APPROVED', reject: 'REJECTED', pay: 'PAID' } as const;
+    const next = target[action];
+    // Enforce the workflow server-side: no paying an unapproved expense, no
+    // re-approving a paid one, no silently resurrecting a rejected expense.
+    if (!canTransition(EXPENSE_TRANSITIONS, existing.status, next)) {
+      return NextResponse.json(
+        { error: `Cannot ${action} an expense in ${existing.status} state`, code: 'INVALID_TRANSITION' },
+        { status: 409 },
+      );
+    }
+    if ((action === 'approve' || action === 'reject') && !admin.permissions.has('finance.approve')) {
+      return NextResponse.json({ error: 'You cannot approve expenses' }, { status: 403 });
+    }
     const map = {
       submit: { status: 'SUBMITTED' as const },
       approve: { status: 'APPROVED' as const, approvedById: admin.id, approvedAt: new Date(), approvalNote: approvalNote ?? null },
       reject: { status: 'REJECTED' as const, approvedById: admin.id, approvedAt: new Date(), approvalNote: approvalNote ?? null },
       pay: { status: 'PAID' as const, paidAt: new Date() },
     };
-    if ((action === 'approve' || action === 'reject') && !admin.permissions.has('finance.approve')) {
-      return NextResponse.json({ error: 'You cannot approve expenses' }, { status: 403 });
-    }
     await prisma.expense.update({ where: { id }, data: map[action] });
     await prisma.auditLog.create({ data: { userId: admin.id, action: `expense.${action}`, entity: 'Expense', entityId: id, metadata: {} } });
     return NextResponse.json({ ok: true, id });
   }
 
+  // Once an expense leaves DRAFT, its figures are locked to preserve the audit
+  // trail; edits are only permitted while it is still a draft.
+  if (existing.status !== 'DRAFT') {
+    return NextResponse.json({ error: 'Only draft expenses can be edited', code: 'LOCKED' }, { status: 409 });
+  }
   const parsed = expenseSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Validation failed' }, { status: 422 });
   const d = parsed.data;

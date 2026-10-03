@@ -50,9 +50,14 @@ export async function POST(req: NextRequest) {
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
   await writeAudit({ userId: user.id, action: 'signin.success', entity: 'User', entityId: user.id, ip });
 
+  // Only echo a same-site absolute path; never reflect an external URL back to
+  // the client, where it would be used as a redirect target (open redirect).
+  const raw = parsed.data.redirect ?? '';
+  const safeRedirect = raw.startsWith('/') && !raw.startsWith('//') && !raw.startsWith('/\\') ? raw : null;
+
   return NextResponse.json({
     ok: true,
     role: user.role?.name ?? 'CUSTOMER',
-    redirect: parsed.data.redirect ?? null,
+    redirect: safeRedirect,
   });
 }

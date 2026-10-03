@@ -11,6 +11,7 @@ import { ShopFilters, SortSelect } from '@/components/shop/ShopFilters';
 import { Pagination } from '@/components/shop/Pagination';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
+import { seoTitle } from '@/lib/seo';
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -28,10 +29,10 @@ export async function generateMetadata({
   const category = typeof sp.category === 'string' ? sp.category : Array.isArray(sp.category) ? sp.category[0] : undefined;
   const categories = category ? await getCategories() : [];
   const active = categories.find((c) => c.slug === category);
-  const title = active ? (locale === 'ar' ? active.nameAr : active.nameEn) : dict.shop.title;
+  const fallback = active ? (locale === 'ar' ? active.nameAr : active.nameEn) : dict.shop.title;
   const query = sp.page ? `?page=${sp.page}` : '';
   return {
-    title,
+    title: seoTitle(active ? (locale === 'ar' ? active.metaTitleAr : active.metaTitleEn) : null, fallback, locale),
     description: dict.brand.description,
     alternates: {
       canonical: `/${locale}/shop${query}`,

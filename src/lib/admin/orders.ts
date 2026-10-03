@@ -203,8 +203,11 @@ export async function createRefund(admin: AdminUser, input: RefundInput) {
     const fullyRefunded = totalRefunded >= Number(order.totalBhd) - 0.0001;
 
     if (fullyRefunded) {
+      // The payment may already be PARTIALLY_REFUNDED from an earlier partial
+      // refund, so match both states — otherwise a completing refund would
+      // leave the payment stuck at PARTIALLY_REFUNDED.
       await tx.payment.updateMany({
-        where: { orderId: order.id, status: 'PAID' },
+        where: { orderId: order.id, status: { in: ['PAID', 'PARTIALLY_REFUNDED'] } },
         data: { status: 'REFUNDED' },
       });
       await tx.order.update({ where: { id: order.id }, data: { status: 'REFUNDED' } });

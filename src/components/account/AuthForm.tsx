@@ -7,6 +7,14 @@ import { clsx } from 'clsx';
 import type { Dict } from '@/i18n/dictionaries';
 import type { Locale } from '@/i18n/config';
 
+/** Only allow same-site, absolute-path redirects (prevents open redirect). */
+function safePath(target: string | null | undefined): string | null {
+  if (target && target.startsWith('/') && !target.startsWith('//') && !target.startsWith('/\\')) {
+    return target;
+  }
+  return null;
+}
+
 export function AuthForm({ locale, dict, mode }: { locale: Locale; dict: Dict; mode: 'signin' | 'signup' }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -62,7 +70,7 @@ export function AuthForm({ locale, dict, mode }: { locale: Locale; dict: Dict; m
         setBusy(false);
         return;
       }
-      const target = data.redirect || redirect || `/${locale}/account`;
+      const target = safePath(data.redirect) || safePath(redirect) || `/${locale}/account`;
       router.push(target);
       router.refresh();
     } catch {

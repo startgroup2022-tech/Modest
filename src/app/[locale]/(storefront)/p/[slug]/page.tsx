@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { getPage } from '@/lib/site';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
+import { seoTitle } from '@/lib/seo';
 import { EmptyState } from '@/components/ui/EmptyState';
 
 export async function generateMetadata({
@@ -18,8 +19,9 @@ export async function generateMetadata({
   const title = locale === 'ar' ? page.titleAr : page.titleEn;
   const body = (locale === 'ar' ? page.bodyAr : page.bodyEn).replace(/<[^>]*>/g, ' ').slice(0, 160);
   return {
-    title,
-    description: body,
+    title: seoTitle(locale === 'ar' ? page.metaTitleAr : page.metaTitleEn, title, locale),
+    description: (locale === 'ar' ? page.metaDescAr : page.metaDescEn) || body,
+    robots: page.noIndex ? { index: false, follow: false } : undefined,
     alternates: {
       canonical: `/${locale}/p/${slug}`,
       languages: { en: `/en/p/${slug}`, ar: `/ar/p/${slug}`, 'x-default': `/en/p/${slug}` },

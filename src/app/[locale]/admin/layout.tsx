@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
 import { headers } from 'next/headers';
+import type { Metadata } from 'next';
 import { getAdminUser } from '@/lib/admin-auth';
 import { getAdminNav } from '@/lib/admin/nav';
 import { getAdminDict } from '@/i18n/admin-dict';
@@ -10,6 +11,12 @@ import { Sidebar, Topbar, MobileNavDrawer } from '@/components/admin/AdminChrome
 import { AdminToast } from '@/components/admin/AdminToast';
 
 export const dynamic = 'force-dynamic';
+
+/** The admin area is private — keep it out of search indexes entirely. */
+export const metadata: Metadata = {
+  title: 'Attention Admin',
+  robots: { index: false, follow: false, nocache: true },
+};
 
 export default async function AdminLayout({
   children,

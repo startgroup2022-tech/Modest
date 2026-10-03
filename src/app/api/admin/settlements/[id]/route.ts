@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
+import { SETTLEMENT_TRANSITIONS, canTransition } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,17 @@ export const PATCH = adminHandler('settlements.manage', async ({ admin, req }) =
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Invalid action' }, { status: 422 });
+
+  const target = { approve: 'APPROVED', pay: 'PAID', cancel: 'CANCELLED' } as const;
+  const next = target[parsed.data.action];
+  // Enforce the workflow server-side so a settlement cannot be paid twice or
+  // paid before approval, which would double-count a tailor payout.
+  if (!canTransition(SETTLEMENT_TRANSITIONS, settlement.status, next)) {
+    return NextResponse.json(
+      { error: `Cannot ${parsed.data.action} a settlement in ${settlement.status} state`, code: 'INVALID_TRANSITION' },
+      { status: 409 },
+    );
+  }
 
   const map = {
     approve: { status: 'APPROVED' as const, approvedById: admin.id, approvedAt: new Date() },

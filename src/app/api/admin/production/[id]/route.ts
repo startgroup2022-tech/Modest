@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
+import { PRODUCTION_TRANSITIONS, canTransition } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +26,31 @@ export const PATCH = adminHandler('production.manage', async ({ admin, req }) =>
 
   const data: Record<string, unknown> = {};
   if (d.notes !== undefined) data.notes = d.notes || null;
+
+  // Resolve the status this action would produce, then validate the edge.
+  let target: string | null = null;
+  if (d.action === 'assign') target = d.tailorId ? 'ASSIGNED' : 'PENDING';
+  else if (d.action === 'start') target = 'IN_PROGRESS';
+  else if (d.action === 'complete') target = 'COMPLETED';
+  else if (d.action === 'rework') target = 'REWORK';
+  else if (d.action === 'cancel') target = 'CANCELLED';
+
+  if (target) {
+    if (!canTransition(PRODUCTION_TRANSITIONS, task.status, target)) {
+      return NextResponse.json(
+        { error: `Cannot ${d.action} a task in ${task.status} state`, code: 'INVALID_TRANSITION' },
+        { status: 409 },
+      );
+    }
+  } else if (task.status === 'CANCELLED' || task.status === 'COMPLETED') {
+    // No cosmetic edits to a finished/cancelled task.
+    if (d.priority !== undefined || d.dueDate !== undefined) {
+      return NextResponse.json(
+        { error: `Cannot edit a task in ${task.status} state`, code: 'INVALID_TRANSITION' },
+        { status: 409 },
+      );
+    }
+  }
 
   switch (d.action) {
     case 'assign':

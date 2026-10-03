@@ -74,6 +74,15 @@ export const POST = adminHandler('orders.create', async ({ admin, req }) => {
   const manualDiscount = Math.min(input.manualDiscountBhd ?? 0, totals.subtotalBhd);
   const finalTotal = Math.max(0, totals.totalBhd - manualDiscount);
 
+  // Apply the same admin-configured payment rules as the storefront so a
+  // method disabled in settings (or outside its order-value limits) cannot be
+  // used to create an order here either. Enforced against the staff-discounted
+  // total, which is what the customer actually pays.
+  const { getPaymentConfigs, assertMethodAllowed } = await import('@/lib/payment-config');
+  const methodConfigs = await getPaymentConfigs();
+  const gate = assertMethodAllowed(methodConfigs[input.paymentMethod], finalTotal);
+  if (!gate.ok) throw new AdminActionError(gate.message, gate.code, 400);
+
   const name =
     customer
       ? [customer.user?.firstName, customer.user?.lastName].filter(Boolean).join(' ') || customer.user?.email || 'Customer'
@@ -103,6 +112,11 @@ export const POST = adminHandler('orders.create', async ({ admin, req }) => {
     shippingBhd,
     coupon: null,
     baseUrl: process.env.APP_URL ?? 'https://attention-modestfashion.com',
+  }).catch((err) => {
+    // Surface stock / availability failures as a clear client error instead of
+    // a generic 500, matching how the storefront checkout reports them.
+    if (err instanceof CheckoutError) throw new AdminActionError(err.message, err.code, 400);
+    throw err;
   });
 
   // Record the manual discount and staff provenance on the order.

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
+import { QC_ALLOWED_STATES } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,15 @@ export const POST = adminHandler('qc.manage', async ({ admin, req }) => {
   const d = parsed.data;
   const task = await prisma.productionTask.findUnique({ where: { id: d.taskId } });
   if (!task) throw new AdminActionError('Task not found', 'NOT_FOUND', 404);
+
+  // Quality control only makes sense once work is under way. Rejecting QC on a
+  // task that never started (or was cancelled) prevents a phantom "PASSED".
+  if (!QC_ALLOWED_STATES.includes(task.status)) {
+    return NextResponse.json(
+      { error: `Cannot run QC on a task in ${task.status} state`, code: 'INVALID_TRANSITION' },
+      { status: 409 },
+    );
+  }
 
   const record = await prisma.$transaction(async (tx) => {
     const rec = await tx.qcRecord.create({

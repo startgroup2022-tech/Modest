@@ -9,6 +9,7 @@ import { StoreProvider } from '@/components/providers/StoreProvider';
 import { getStorefrontContext } from '@/lib/storefront';
 import { getCurrentUser } from '@/lib/auth';
 import { isLocale } from '@/i18n/config';
+import { SiteJsonLd } from '@/components/seo/SiteJsonLd';
 
 export default async function StorefrontLayout({
   children,
@@ -29,6 +30,7 @@ export default async function StorefrontLayout({
       initialCurrency={ctx.currency.code}
       currencyMeta={ctx.currencyMeta}
     >
+      <SiteJsonLd locale={locale} />
       <div className="flex min-h-screen flex-col">
         <a
           href="#main"

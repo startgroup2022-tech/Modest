@@ -13,6 +13,7 @@ import { Price } from '@/components/ui/Price';
 import { ArrowRight, WhatsAppIcon } from '@/components/ui/icons';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
+import { seoTitle } from '@/lib/seo';
 
 export async function generateMetadata({
   params,
@@ -30,7 +31,7 @@ export async function generateMetadata({
   const path = `/${locale}/product/${product.slug}`;
   const image = product.media[0]?.url;
   return {
-    title: (locale === 'ar' ? product.metaTitleAr : product.metaTitleEn) ?? name,
+    title: seoTitle(locale === 'ar' ? product.metaTitleAr : product.metaTitleEn, name, locale),
     description,
     alternates: {
       canonical: path,
