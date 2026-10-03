@@ -39,6 +39,7 @@ commit real values; `.env` is git-ignored.
 | `DATABASE_URL` | yes | `mysql://user:pass@localhost:3306/attention` |
 | `AUTH_SECRET` | yes | Long random value. `openssl rand -base64 48` |
 | `NEXT_PUBLIC_SITE_URL` | yes | `https://attention-modestfashion.com` (no trailing slash) |
+| `APP_URL` | recommended | Absolute origin used to build payment return/callback URLs, e.g. `https://attention-modestfashion.com`. Defaults to the live domain if omitted. |
 | `PORT` | no | Provided by cPanel/Passenger automatically |
 | `TAPP_ENV` | no | `sandbox` or `live` |
 | `TAPP_BASE_URL` | no | TAPP API base, e.g. `https://api.tapp.sa` |
@@ -115,6 +116,11 @@ After every future schema change, generate a new migration locally with
 If the database user lacks `CREATE DATABASE` rights, create the database in
 cPanel first and only run `migrate deploy` (never `migrate dev` on production).
 
+> **Fresh install note.** A database that has just been migrated has no
+> currencies configured yet. The storefront detects this and falls back to BHD
+> so it still renders; running `npm run db:seed` (or adding currencies in
+> Admin → Settings) activates the full multi-currency selector.
+
 ---
 
 ## 5. Static & uploaded media
@@ -162,3 +168,53 @@ None are required for the storefront. Optional:
    clear message when a method is disabled.
 5. Confirm TAPP webhook deliveries arrive and are accepted in the Payment log
    (unsigned requests must be rejected with HTTP 401).
+
+---
+
+## 9. Deployment verification (owned by engineering)
+
+The following were verified locally in the final deployment-QA pass. They can be
+re-run on the host after deploy.
+
+**Commands**
+
+```bash
+npm ci                 # clean install (postinstall runs prisma generate)
+npx prisma migrate deploy
+npm run typecheck      # tsc --noEmit
+npm run lint           # next lint
+npm test               # vitest, 66 tests
+npm run build          # next build
+npm run start          # local production server
+```
+
+**Verified**
+
+| Area | Result |
+| --- | --- |
+| Clean install + production build | passes, no build warnings |
+| Typecheck / lint / tests | 0 errors, 0 warnings, 66/66 pass |
+| Schema vs migration | `prisma migrate diff` reports no difference |
+| Health endpoint | `{"status":"ok","database":"up"}` |
+| Storefront routes (EN + AR) | `/`, `/shop`, `/search`, `/collections`, `/about`, `/size-guide`, `/cart`, `/checkout`, product pages — all 200 |
+| Locale attributes | `<html lang="en" dir="ltr">` / `<html lang="ar" dir="rtl">` |
+| Unconfigured currency | storefront renders with BHD fallback (regression test added) |
+| Cart flow | add / update qty / valid + invalid coupon all correct |
+| Checkout (COD, Bank Transfer) | order created, totals correct, stock decremented |
+| Idempotency | replayed checkout key returns the same order (no duplicate) |
+| Disabled payment method | checkout rejected with `DISABLED` |
+| Admin (RBAC) | anonymous + customer → 401; admin → authorized |
+| TAPP webhook | unsigned request rejected `401 Invalid signature` |
+| Rate limiting | sign-in burst returns 429 after the limit |
+| SEO | canonical, hreflang (en/ar/x-default), sitemap, robots, Product/Offer/BreadcrumbList/Organization/WebSite JSON-LD |
+| Security headers | CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy present |
+
+**Owner action still required (cannot be automated)**
+
+- Provide cPanel + production MySQL access to actually deploy.
+- Point DNS/TLS at the host and set `NEXT_PUBLIC_SITE_URL` / `APP_URL`.
+- Set a real `AUTH_SECRET`, then seed and change the admin password.
+- Enter TAPP credentials (or keep TAPP disabled) and configure currencies,
+  shipping and payment methods in Admin.
+
+

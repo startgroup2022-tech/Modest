@@ -2,20 +2,13 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { prisma } from './prisma';
 import { bhdToPresentment, presentmentToBhd } from './money';
+import { DEFAULT_CURRENCY, selectCurrency, symbolFor } from './currency-select';
+import type { StoreCurrency } from './currency-select';
 
 export const CURRENCY_COOKIE = 'att_currency';
 
-export interface StoreCurrency {
-  code: string;
-  nameEn: string;
-  nameAr: string;
-  symbolEn: string;
-  symbolAr: string;
-  decimals: number;
-  symbolPosition: 'prefix' | 'suffix';
-  rateToBhd: number;
-  isDefault: boolean;
-}
+export { DEFAULT_CURRENCY, selectCurrency, symbolFor };
+export type { StoreCurrency };
 
 function toStoreCurrency(c: {
   code: string;
@@ -52,9 +45,7 @@ export async function getActiveCurrencies(): Promise<StoreCurrency[]> {
 export async function getSelectedCurrency(): Promise<StoreCurrency> {
   const list = await getActiveCurrencies();
   const store = await cookies();
-  const code = store.get(CURRENCY_COOKIE)?.value;
-  const found = code ? list.find((c) => c.code === code) : undefined;
-  return found ?? list.find((c) => c.isDefault) ?? list[0];
+  return selectCurrency(list, store.get(CURRENCY_COOKIE)?.value);
 }
 
 export interface PriceView {
@@ -78,10 +69,6 @@ export function presentPrice(amountBhd: number, currency: StoreCurrency): PriceV
     symbolPosition: currency.symbolPosition,
     rateToBhd: currency.rateToBhd,
   };
-}
-
-export function symbolFor(currency: StoreCurrency, locale: 'en' | 'ar'): string {
-  return locale === 'ar' ? currency.symbolAr || currency.symbolEn : currency.symbolEn;
 }
 
 export { presentmentToBhd, bhdToPresentment };
