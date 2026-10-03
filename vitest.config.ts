@@ -9,6 +9,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // `server-only` is a Next.js build-time marker with no runtime module;
+      // the unit suite runs plain Node, so point it at an inert stub.
+      'server-only': fileURLToPath(new URL('./src/test/stubs/server-only.ts', import.meta.url)),
     },
   },
 });

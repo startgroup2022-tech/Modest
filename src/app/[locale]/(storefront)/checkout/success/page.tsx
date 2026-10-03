@@ -48,6 +48,15 @@ export default async function CheckoutSuccessPage({
         })()
       : null;
 
+  // Owner-authored step-by-step copy for the method that was actually used.
+  const { getPaymentConfigs } = await import('@/lib/payment-config');
+  const methodConfig = payment ? (await getPaymentConfigs())[payment.method] : null;
+  const methodNote = methodConfig
+    ? locale === 'ar'
+      ? methodConfig.instructionsAr
+      : methodConfig.instructionsEn
+    : '';
+
   return (
     <div className="shell flex min-h-[70vh] max-w-2xl flex-col items-center justify-center py-20 text-center">
       <span className="flex h-16 w-16 items-center justify-center rounded-full border border-ink">
@@ -94,6 +103,13 @@ export default async function CheckoutSuccessPage({
           <p className="mt-2 text-caption text-ink-faint">
             {locale === 'ar' ? 'اذكري رقم الطلب في المرجع.' : 'Please include your order number as the reference.'}
           </p>
+        </div>
+      ) : null}
+
+      {methodNote && (!instructions || (payment?.method !== 'BANK_TRANSFER' && payment?.method !== 'BENEFIT')) ? (
+        <div className="mt-6 w-full border border-line bg-paper-warm p-5 text-start text-small text-ink-muted">
+          <p className="eyebrow mb-2">{payment?.method.replace('_', ' ') ?? ''}</p>
+          <p>{methodNote}</p>
         </div>
       ) : null}
 

@@ -8,6 +8,8 @@ import { isLocale, type Locale } from '@/i18n/config';
 import { PageHeader, Panel, Tabs, AdminEmpty } from '@/components/admin/ui';
 import { SettingForm, type SettingField } from '@/components/admin/SettingForm';
 import { CurrencyManager } from '@/components/admin/CurrencyManager';
+import { PaymentMethodManager } from '@/components/admin/PaymentMethodManager';
+import { getPaymentConfigs } from '@/lib/payment-config';
 import { maskSecret } from '@/lib/admin/settings';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +27,7 @@ export default async function SettingsPage({
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
-  await requireAdminPage('settings.view', locale);
+  const admin = await requireAdminPage('settings.view', locale);
   const dict = getAdminDict(locale);
   const s = dict.settings;
   const sp = await searchParams;
@@ -37,6 +39,7 @@ export default async function SettingsPage({
     return (row?.value as Json) ?? {};
   };
   const currencies = await prisma.currency.findMany({ orderBy: { sortOrder: 'asc' } });
+  const paymentConfigs = await getPaymentConfigs();
 
   const store = get('store');
   const checkout = get('checkout');
@@ -65,27 +68,24 @@ export default async function SettingsPage({
     { key: 'enableOrderNotes', label: locale === 'ar' ? 'تفعيل ملاحظات الطلب' : 'Enable order notes', type: 'checkbox' },
   ];
 
-  const paymentFields: SettingField[] = [
-    { key: 'enableCod', label: s.enableCod, type: 'checkbox' },
-    { key: 'enableBank', label: s.enableBank, type: 'checkbox' },
-    { key: 'enableBenefit', label: s.enableBenefit, type: 'checkbox' },
-    { key: 'enableTapp', label: s.enableTapp, type: 'checkbox' },
-  ];
-
   const bankFields: SettingField[] = [
     { key: 'bankName', label: dict.system.bankName },
     { key: 'accountName', label: dict.system.accountName },
     { key: 'iban', label: dict.system.iban },
+    { key: 'accountNumber', label: dict.system.accountNumber },
+    { key: 'instructionsEn', label: s.instructionsEn, type: 'textarea', full: true },
+    { key: 'instructionsAr', label: s.instructionsAr, type: 'textarea', full: true },
   ];
 
   const benefitFields: SettingField[] = [
     { key: 'alias', label: dict.system.alias },
     { key: 'accountNumber', label: dict.system.accountNumber },
     { key: 'accountName', label: dict.system.accountName },
+    { key: 'instructionsEn', label: s.instructionsEn, type: 'textarea', full: true },
+    { key: 'instructionsAr', label: s.instructionsAr, type: 'textarea', full: true },
   ];
 
   const tappFields: SettingField[] = [
-    { key: 'enabled', label: dict.common.enabled, type: 'checkbox' },
     { key: 'environment', label: dict.system.environment, placeholder: 'sandbox' },
     { key: 'baseUrl', label: dict.system.baseUrl, type: 'url' },
     { key: 'merchantId', label: dict.system.merchantId },
@@ -100,7 +100,7 @@ export default async function SettingsPage({
     { key: 'currencies', label: s.currencies, href: `?tab=currencies` },
   ];
 
-  const canEdit = true;
+  const canEdit = admin.permissions.has('settings.edit');
 
   return (
     <>
@@ -120,8 +120,33 @@ export default async function SettingsPage({
 
       {tab === 'payments' && (
         <div className="grid gap-6">
-          <Panel title={s.payments}>
-            <SettingForm settingKey="payments" initial={{ enableCod: true, enableBank: true, enableBenefit: true, enableTapp: false, ...get('payments') }} fields={paymentFields} dict={{ common: dict.common, settings: s }} />
+          <Panel title={s.methods}>
+            <p className="mb-4 text-caption text-ink-faint">{s.methodsHint}</p>
+            <PaymentMethodManager
+              configs={(['COD', 'BANK_TRANSFER', 'BENEFIT', 'TAPP'] as const).map((m) => paymentConfigs[m])}
+              locale={locale}
+              labels={{
+                methodEnabled: s.methodEnabled,
+                methodVisible: s.methodVisible,
+                methodLabelEn: s.methodLabelEn,
+                methodLabelAr: s.methodLabelAr,
+                methodDescEn: s.methodDescEn,
+                methodDescAr: s.methodDescAr,
+                instructionsEn: s.instructionsEn,
+                instructionsAr: s.instructionsAr,
+                sortOrder: s.sortOrder,
+                minOrder: s.minOrder,
+                maxOrder: s.maxOrder,
+                saveMethods: s.saveMethods,
+                saving: dict.common.saving,
+                saved: dict.common.saved,
+                testConnection: s.testConnection,
+                testSuccess: s.testSuccess,
+                testFailed: s.testFailed,
+                testHint: s.testHint,
+              }}
+              canEdit={canEdit}
+            />
           </Panel>
           <div className="grid gap-6 lg:grid-cols-2">
             <Panel title={s.bank}>

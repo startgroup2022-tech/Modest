@@ -382,6 +382,14 @@ export async function applyPaymentResult(params: {
       return payment; // idempotent — already applied
     }
 
+    // A settled payment can never be downgraded by a later or replayed callback
+    // (e.g. a delayed FAILED event after a successful capture). Refunds are the
+    // only legal move away from a settled state and are handled elsewhere.
+    const settled = payment.status === 'PAID' || payment.status === 'REFUNDED' || payment.status === 'PARTIALLY_REFUNDED';
+    if (settled && status !== 'PAID' && status !== 'REFUNDED') {
+      return payment;
+    }
+
     const updated = await tx.payment.update({
       where: { id: payment.id },
       data: {

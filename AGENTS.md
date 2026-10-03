@@ -41,3 +41,26 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   (defaults `admin@attention-modestfashion.com` / `ChangeMe123!`).
 - `POST /api/auth/signin` returns an httpOnly cookie usable for authed curl
   smoke tests of `/en/admin/*` and `/ar/admin/*`.
+
+## Payments
+- `src/lib/payment-config.ts` is the single source of truth for method
+  enable/visibility, labels, ordering, order-value limits and instructions.
+  It reads the `payments_config` site setting and falls back to the legacy
+  `payments` booleans, then to code defaults. Checkout enforces the method
+  server-side via `assertMethodAllowed` — never trust the client's method list.
+- `src/lib/payments/index.ts` holds the provider abstraction
+  (`getPaymentProvider`, `listEnabledPaymentMethods`, `testTappConnection`).
+  TAPP availability requires credentials; the on/off switch is the method flag.
+- `applyPaymentResult` is idempotent and refuses to downgrade a settled payment
+  from a late/replayed webhook. The TAPP webhook rejects unsigned requests
+  (HTTP 401) and refuses an amount mismatch.
+- `PaymentMethodManager` (client) edits `payments_config`; the TAPP "Test
+  configuration" button hits `POST /api/admin/payments/tapp-test`, which reports
+  missing fields or reachability and never fakes a connected state.
+
+## Deployment
+- cPanel target: see `DEPLOYMENT.md`. Entry point is `server.js` (Passenger).
+- Baseline Prisma migration is committed at `prisma/migrations/0_init`.
+  Production uses `npx prisma migrate deploy`; existing databases baseline once
+  with `npx prisma migrate resolve --applied 0_init`.
+- `GET /api/health` is the liveness/readiness probe (checks the DB).

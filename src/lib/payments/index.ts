@@ -1,6 +1,7 @@
 import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../prisma';
+import { getPaymentConfigs, PAYMENT_METHODS } from '../payment-config';
 import type { PaymentMethodType } from '@prisma/client';
 
 /**
@@ -39,6 +40,13 @@ export interface WebhookResult {
   signatureVerified: boolean;
 }
 
+export interface TappTestResult {
+  state: 'success' | 'failed' | 'not_configured';
+  ok: boolean;
+  environment: string;
+  message: string;
+}
+
 export interface PaymentProvider {
   readonly method: PaymentMethodType;
   readonly key: string;
@@ -66,7 +74,13 @@ class CodProvider implements PaymentProvider {
     return true;
   }
   async init(): Promise<PaymentInitResult> {
-    return { status: 'PENDING', provider: 'cod' };
+    const { getPaymentConfigs } = await import('../payment-config');
+    const cfg = (await getPaymentConfigs()).COD;
+    const instructions =
+      cfg.instructionsEn || cfg.instructionsAr
+        ? { en: cfg.instructionsEn, ar: cfg.instructionsAr }
+        : undefined;
+    return { status: 'PENDING', provider: 'cod', instructions };
   }
   async verifyWebhook(): Promise<WebhookResult> {
     return { status: 'PENDING', signatureVerified: false };
@@ -80,14 +94,27 @@ class BankTransferProvider implements PaymentProvider {
     return true;
   }
   async init(): Promise<PaymentInitResult> {
+    const { getPaymentConfigs } = await import('../payment-config');
+    const cfg = (await getPaymentConfigs()).BANK_TRANSFER;
     const details = await getSetting('bank_transfer_details', {
       bankName: process.env.BANK_NAME ?? '',
       iban: process.env.BANK_IBAN ?? '',
+      accountNumber: '',
       accountName: process.env.BANK_ACCOUNT_NAME ?? 'Attention Modest Fashion',
+      instructionsEn: '',
+      instructionsAr: '',
     });
-    const en = `Transfer to ${details.bankName || 'our bank'} — Account: ${details.accountName}, IBAN: ${details.iban || 'to be provided'}. Include your order number as the reference.`;
-    const ar = `حوّلي إلى ${details.bankName || 'حسابنا البنكي'} — الحساب: ${details.accountName}، الآيبان: ${details.iban || 'سيتم تزويدك به'}. اذكري رقم الطلب في المرجع.`;
-    return { status: 'PENDING', provider: 'bank_transfer', instructions: { en, ar } };
+    const step = (locale: 'en' | 'ar') => {
+      const custom = locale === 'en' ? details.instructionsEn : details.instructionsAr;
+      return custom ? ` ${custom}` : '';
+    };
+    const en = `Transfer to ${details.bankName || 'our bank'} — Account: ${details.accountName}, IBAN: ${details.iban || 'to be provided'}${details.accountNumber ? `, Account no: ${details.accountNumber}` : ''}. Include your order number as the reference.${step('en')}`;
+    const ar = `حوّلي إلى ${details.bankName || 'حسابنا البنكي'} — الحساب: ${details.accountName}، الآيبان: ${details.iban || 'سيتم تزويدك به'}${details.accountNumber ? `، رقم الحساب: ${details.accountNumber}` : ''}. اذكري رقم الطلب في المرجع.${step('ar')}`;
+    const instructions =
+      cfg.instructionsEn || cfg.instructionsAr
+        ? { en: cfg.instructionsEn || en, ar: cfg.instructionsAr || ar }
+        : { en, ar };
+    return { status: 'PENDING', provider: 'bank_transfer', instructions };
   }
   async verifyWebhook(): Promise<WebhookResult> {
     return { status: 'PENDING', signatureVerified: false };
@@ -101,14 +128,26 @@ class BenefitProvider implements PaymentProvider {
     return true;
   }
   async init(): Promise<PaymentInitResult> {
+    const { getPaymentConfigs } = await import('../payment-config');
+    const cfg = (await getPaymentConfigs()).BENEFIT;
     const details = await getSetting('benefit_details', {
       alias: process.env.BENEFIT_ALIAS ?? '',
       accountName: process.env.BENEFIT_ACCOUNT_NAME ?? 'Attention Modest Fashion',
       accountNumber: process.env.BENEFIT_ACCOUNT_NUMBER ?? '',
+      instructionsEn: '',
+      instructionsAr: '',
     });
-    const en = `Send payment via BenefitPay to alias ${details.alias || 'our alias'} (${details.accountName}). Include your order number as the note.`;
-    const ar = `أرسلي الدفعة عبر بنفت بي إلى المعرّف ${details.alias || 'معرّفنا'} (${details.accountName}). اذكري رقم الطلب في الملاحظة.`;
-    return { status: 'PENDING', provider: 'benefit', instructions: { en, ar } };
+    const step = (locale: 'en' | 'ar') => {
+      const custom = locale === 'en' ? details.instructionsEn : details.instructionsAr;
+      return custom ? ` ${custom}` : '';
+    };
+    const en = `Send payment via BenefitPay to alias ${details.alias || 'our alias'} (${details.accountName}). Include your order number as the note.${step('en')}`;
+    const ar = `أرسلي الدفعة عبر بنفت بي إلى المعرّف ${details.alias || 'معرّفنا'} (${details.accountName}). اذكري رقم الطلب في الملاحظة.${step('ar')}`;
+    const instructions =
+      cfg.instructionsEn || cfg.instructionsAr
+        ? { en: cfg.instructionsEn || en, ar: cfg.instructionsAr || ar }
+        : { en, ar };
+    return { status: 'PENDING', provider: 'benefit', instructions };
   }
   async verifyWebhook(): Promise<WebhookResult> {
     return { status: 'PENDING', signatureVerified: false };
@@ -116,7 +155,6 @@ class BenefitProvider implements PaymentProvider {
 }
 
 interface TappConfig {
-  enabled: boolean;
   environment: 'sandbox' | 'live';
   baseUrl: string;
   merchantId: string;
@@ -131,7 +169,6 @@ class TappProvider implements PaymentProvider {
   private async config(): Promise<TappConfig> {
     const stored = await getSetting<Partial<TappConfig>>('tapp_config', {});
     return {
-      enabled: stored.enabled ?? false,
       environment: stored.environment ?? (process.env.TAPP_ENV === 'live' ? 'live' : 'sandbox'),
       baseUrl: stored.baseUrl || process.env.TAPP_BASE_URL || 'https://api.tapp.sa',
       merchantId: stored.merchantId || process.env.TAPP_MERCHANT_ID || '',
@@ -140,14 +177,56 @@ class TappProvider implements PaymentProvider {
     };
   }
 
+  /** Usable when credentials exist. The on/off switch lives in payments_config. */
   async isEnabled() {
     const c = await this.config();
-    return Boolean(c.enabled && c.merchantId && c.apiKey);
+    return Boolean(c.merchantId && c.apiKey);
+  }
+
+  /**
+   * Non-destructive configuration check. It never claims "connected" without a
+   * server response: it reports exactly which fields are missing, and when
+   * credentials are present it probes the configured base URL. A network or
+   * HTTP error is surfaced as `failed` with the real reason.
+   */
+  async testConfig(): Promise<TappTestResult> {
+    const c = await this.config();
+    const missing: string[] = [];
+    if (!c.merchantId) missing.push('merchantId');
+    if (!c.apiKey) missing.push('apiKey');
+    if (!c.webhookSecret) missing.push('webhookSecret');
+    if (!c.baseUrl) missing.push('baseUrl');
+    if (missing.length) {
+      return { state: 'not_configured', ok: false, environment: c.environment, message: `Missing: ${missing.join(', ')}` };
+    }
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(c.baseUrl, { method: 'HEAD', signal: controller.signal, cache: 'no-store' }).catch(
+        async () => fetch(c.baseUrl, { method: 'GET', signal: controller.signal, cache: 'no-store' }),
+      );
+      clearTimeout(timer);
+      // Any HTTP response proves the endpoint is reachable and the base URL is
+      // valid; an auth decision (401/403) is a successful *transport* check.
+      return {
+        state: 'success',
+        ok: true,
+        environment: c.environment,
+        message: `Endpoint reachable (HTTP ${res.status}). Credentials are stored but not validated against a live transaction.`,
+      };
+    } catch (err) {
+      return {
+        state: 'failed',
+        ok: false,
+        environment: c.environment,
+        message: err instanceof Error ? err.message : 'Connection failed',
+      };
+    }
   }
 
   async init(input: PaymentIntentInput): Promise<PaymentInitResult> {
     const c = await this.config();
-    if (!(c.enabled && c.merchantId && c.apiKey)) {
+    if (!(c.merchantId && c.apiKey)) {
       return { status: 'FAILED', provider: 'tapp' };
     }
     try {
@@ -226,6 +305,11 @@ export function getPaymentProvider(method: PaymentMethodType): PaymentProvider {
   return registry[method];
 }
 
+/** Runs the TAPP connectivity check against the currently saved configuration. */
+export async function testTappConnection(): Promise<TappTestResult> {
+  return (registry.TAPP as TappProvider).testConfig();
+}
+
 export interface PaymentMethodMeta {
   method: PaymentMethodType;
   key: string;
@@ -235,38 +319,26 @@ export interface PaymentMethodMeta {
   descriptionAr: string;
 }
 
+/**
+ * Methods the storefront may offer. Labels/copy come from the admin-configured
+ * `payments_config`; the provider itself must also be usable (e.g. TAPP needs
+ * credentials), so an enabled-but-unconfigured gateway is never shown.
+ */
 export async function listEnabledPaymentMethods(): Promise<PaymentMethodMeta[]> {
-  const meta: Record<PaymentMethodType, Omit<PaymentMethodMeta, 'method' | 'key'>> = {
-    COD: {
-      labelEn: 'Cash on Delivery',
-      labelAr: 'الدفع عند الاستلام',
-      descriptionEn: 'Pay in cash when your order is delivered.',
-      descriptionAr: 'ادفعي نقداً عند استلام طلبك.',
-    },
-    BANK_TRANSFER: {
-      labelEn: 'Bank Transfer',
-      labelAr: 'تحويل بنكي',
-      descriptionEn: 'Transfer to our bank account.',
-      descriptionAr: 'حوّلي إلى حسابنا البنكي.',
-    },
-    BENEFIT: {
-      labelEn: 'BenefitPay Transfer',
-      labelAr: 'تحويل بنفت بي',
-      descriptionEn: 'Send payment via BenefitPay.',
-      descriptionAr: 'أرسلي الدفعة عبر بنفت بي.',
-    },
-    TAPP: {
-      labelEn: 'TAPP',
-      labelAr: 'تاب',
-      descriptionEn: 'Pay securely online with TAPP.',
-      descriptionAr: 'ادفعي بأمان عبر الإنترنت باستخدام تاب.',
-    },
-  };
+  const configs = await getPaymentConfigs();
   const results: PaymentMethodMeta[] = [];
-  for (const method of Object.keys(registry) as PaymentMethodType[]) {
-    if (await registry[method].isEnabled()) {
-      results.push({ method, key: registry[method].key, ...meta[method] });
-    }
+  for (const method of PAYMENT_METHODS) {
+    const cfg = configs[method];
+    if (!cfg.enabled || !cfg.visible) continue;
+    if (!(await registry[method].isEnabled())) continue;
+    results.push({
+      method,
+      key: registry[method].key,
+      labelEn: cfg.labelEn,
+      labelAr: cfg.labelAr,
+      descriptionEn: cfg.descriptionEn,
+      descriptionAr: cfg.descriptionAr,
+    });
   }
-  return results;
+  return results.sort((a, b) => configs[a.method].sortOrder - configs[b.method].sortOrder);
 }

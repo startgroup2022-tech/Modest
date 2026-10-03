@@ -5,6 +5,7 @@ import { getCartView, clearCart } from '@/lib/cart';
 import { getSelectedCurrency } from '@/lib/currency';
 import { checkoutSchema } from '@/lib/validation';
 import { createOrder, resolveCartLines, CheckoutError } from '@/lib/orders';
+import { computeTotals } from '@/lib/money';
 import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
 import type { CouponLike } from '@/lib/money';
@@ -103,6 +104,21 @@ export async function POST(req: NextRequest) {
     const lines = await resolveCartLines(
       cart.items.map((i) => ({ productId: i.productId, variantId: i.variantId, quantity: i.quantity })),
     );
+
+    // Recompute the order total server-side before honouring the chosen method,
+    // so the enabled flag and any order-value limits cannot be bypassed by a
+    // client that simply posts a different method.
+    const previewTotals = computeTotals(
+      lines.map((l) => ({ unitPriceBhd: l.unitPriceBhd, quantity: l.quantity })),
+      coupon,
+      shippingBhd,
+    );
+    const { getPaymentConfigs, assertMethodAllowed } = await import('@/lib/payment-config');
+    const methodConfigs = await getPaymentConfigs();
+    const gate = assertMethodAllowed(methodConfigs[parsed.data.paymentMethod], previewTotals.totalBhd);
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.message, code: gate.code, field: 'paymentMethod' }, { status: 400 });
+    }
 
     const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? req.nextUrl.origin;
     const order = await createOrder({
