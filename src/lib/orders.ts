@@ -4,7 +4,7 @@ import { computeTotals, type CouponLike } from './money';
 import { generateOrderNumber, roundBhd } from './utils';
 import { getPaymentProvider, type PaymentInitResult } from './payments';
 import type { CheckoutInput } from './validation';
-import type { OrderStatus, PaymentStatus } from '@prisma/client';
+import type { OrderStatus, Prisma, PaymentStatus } from '@prisma/client';
 
 export interface ResolvedLine {
   productId: string;
@@ -158,27 +158,6 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
   const presentmentTotal = roundBhd(totals.totalBhd * input.currency.rateToBhd);
 
   const order = await prisma.$transaction(async (tx) => {
-    // Guarded stock decrement — fails the whole transaction on oversell.
-    for (const line of lines) {
-      if (!line.variantId) continue;
-      const variant = await tx.productVariant.findUnique({ where: { id: line.variantId } });
-      if (!variant || !variant.isActive) {
-        throw new CheckoutError('Selected variant is unavailable', 'UNAVAILABLE');
-      }
-      if (variant.stockStatus === 'OUT_OF_STOCK') {
-        throw new CheckoutError('Selected variant is out of stock', 'UNAVAILABLE');
-      }
-      if (variant.stockStatus !== 'PRE_ORDER') {
-        const updated = await tx.productVariant.updateMany({
-          where: { id: line.variantId, stock: { gte: line.quantity } },
-          data: { stock: { decrement: line.quantity } },
-        });
-        if (updated.count === 0) {
-          throw new CheckoutError('Not enough stock for the requested quantity', 'UNAVAILABLE');
-        }
-      }
-    }
-
     const created = await tx.order.create({
       data: {
         orderNumber: generateOrderNumber(),
@@ -223,6 +202,37 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
         },
       },
     });
+
+    // Guarded stock decrement — fails the whole transaction on oversell, and
+    // records the movement in the ledger so stock never changes silently.
+    for (const line of lines) {
+      if (!line.variantId) continue;
+      const variant = await tx.productVariant.findUnique({ where: { id: line.variantId } });
+      if (!variant || !variant.isActive) {
+        throw new CheckoutError('Selected variant is unavailable', 'UNAVAILABLE');
+      }
+      if (variant.stockStatus === 'OUT_OF_STOCK') {
+        throw new CheckoutError('Selected variant is out of stock', 'UNAVAILABLE');
+      }
+      if (variant.stockStatus === 'PRE_ORDER') continue;
+      const updated = await tx.productVariant.updateMany({
+        where: { id: line.variantId, stock: { gte: line.quantity } },
+        data: { stock: { decrement: line.quantity } },
+      });
+      if (updated.count === 0) {
+        throw new CheckoutError('Not enough stock for the requested quantity', 'UNAVAILABLE');
+      }
+      await tx.inventoryMovement.create({
+        data: {
+          variantId: line.variantId,
+          productId: line.productId,
+          type: 'SALE',
+          quantity: -line.quantity,
+          stockAfter: variant.stock - line.quantity,
+          orderId: created.id,
+        },
+      });
+    }
 
     const couponId = coupon && 'id' in (coupon as unknown as Record<string, unknown>)
       ? ((coupon as unknown as { id: string }).id)
@@ -299,6 +309,54 @@ export function statusIndex(status: OrderStatus): number {
 
 export function isTerminal(status: OrderStatus): boolean {
   return status === 'CANCELLED' || status === 'REFUNDED';
+}
+
+/**
+ * Releases stock held by an order's items back into inventory, recording a
+ * movement per line. Safe to call once — guarded by the order's terminal state.
+ */
+export async function releaseOrderStock(
+  orderId: string,
+  actorId: string | null,
+  tx?: Prisma.TransactionClient,
+) {
+  const run = async (client: Prisma.TransactionClient) => {
+    const items = await client.orderItem.findMany({ where: { orderId } });
+    for (const item of items) {
+      if (!item.variantId) continue;
+      const variant = await client.productVariant.findUnique({ where: { id: item.variantId } });
+      if (!variant) continue;
+      const stockAfter = variant.stock + item.quantity;
+      await client.productVariant.update({
+        where: { id: item.variantId },
+        data: {
+          stock: stockAfter,
+          stockStatus:
+            variant.stockStatus === 'PRE_ORDER'
+              ? 'PRE_ORDER'
+              : stockAfter <= 0
+                ? 'OUT_OF_STOCK'
+                : variant.stockStatus === 'OUT_OF_STOCK'
+                  ? 'IN_STOCK'
+                  : variant.stockStatus,
+        },
+      });
+      await client.inventoryMovement.create({
+        data: {
+          variantId: item.variantId,
+          productId: item.productId ?? '',
+          type: 'CANCELLATION',
+          quantity: item.quantity,
+          stockAfter,
+          orderId,
+          actorId,
+          reason: 'Order cancelled — stock released',
+        },
+      });
+    }
+  };
+  if (tx) return run(tx);
+  return prisma.$transaction(run);
 }
 
 /** Applies a verified payment result to an order, idempotently. */

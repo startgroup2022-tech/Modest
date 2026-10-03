@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { DEFAULT_ROLE_PERMISSIONS } from '../src/lib/permission-defs';
 
 const prisma = new PrismaClient();
 
@@ -461,6 +462,49 @@ async function main() {
       create: r,
     });
     roles[r.name] = role.id;
+  }
+
+  // ── Role permissions ───────────────────────────────────
+  for (const [roleName, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
+    const roleId = roles[roleName];
+    if (!roleId) continue;
+    await prisma.rolePermission.deleteMany({ where: { roleId } });
+    if (perms.length) {
+      await prisma.rolePermission.createMany({
+        data: perms.map((permission) => ({ roleId, permission })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  // ── Expense categories ─────────────────────────────────
+  const expenseCategories = [
+    { nameEn: 'Fabric & Materials', nameAr: 'الأقمشة والمواد' },
+    { nameEn: 'Tailor Wages', nameAr: 'أجور الخياطة' },
+    { nameEn: 'Packaging', nameAr: 'التغليف' },
+    { nameEn: 'Shipping & Courier', nameAr: 'الشحن والتوصيل' },
+    { nameEn: 'Marketing', nameAr: 'التسويق' },
+    { nameEn: 'Software & Subscriptions', nameAr: 'البرمجيات والاشتراكات' },
+    { nameEn: 'Rent & Utilities', nameAr: 'الإيجار والمرافق' },
+    { nameEn: 'Other', nameAr: 'أخرى' },
+  ];
+  for (const c of expenseCategories) {
+    const existing = await prisma.expenseCategory.findFirst({ where: { nameEn: c.nameEn } });
+    if (!existing) await prisma.expenseCategory.create({ data: c });
+  }
+
+  // ── Tailors (atelier) ──────────────────────────────────
+  const tailors = [
+    { code: 'TL-001', nameEn: 'Atelier A — Abayas', nameAr: 'الأتيليه أ — العبايات', specialization: 'Abayas', capacity: 6, rateBhd: 12 },
+    { code: 'TL-002', nameEn: 'Atelier B — Dresses', nameAr: 'الأتيليه ب — الفساتين', specialization: 'Dresses', capacity: 5, rateBhd: 14 },
+    { code: 'TL-003', nameEn: 'Atelier C — Embroidery', nameAr: 'الأتيليه ج — التطريز', specialization: 'Embroidery', capacity: 4, rateBhd: 18 },
+  ];
+  for (const t of tailors) {
+    await prisma.tailor.upsert({
+      where: { code: t.code },
+      update: t,
+      create: { ...t, status: 'ACTIVE' },
+    });
   }
 
   // ── Users ──────────────────────────────────────────────

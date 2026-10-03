@@ -12,13 +12,23 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
   return { title: getDictionary(locale).account.signIn, robots: { index: false, follow: false } };
 }
 
-export default async function SignInPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function SignInPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ redirect?: string }>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
   const dict = getDictionary(locale);
+  const { redirect: redirectTo } = await searchParams;
   const user = await getCurrentUser();
-  if (user) redirect(`/${locale}/account`);
+  if (user) {
+    if (redirectTo) redirect(redirectTo);
+    redirect(user.role === 'CUSTOMER' ? `/${locale}/account` : `/${locale}/admin`);
+  }
 
   return (
     <div className="shell py-16 md:py-24">
