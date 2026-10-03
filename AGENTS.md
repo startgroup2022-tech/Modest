@@ -58,6 +58,21 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   configuration" button hits `POST /api/admin/payments/tapp-test`, which reports
   missing fields or reachability and never fakes a connected state.
 
+## Admin resources → storefront
+- Admin content screens ship with matching `/api/admin/<resource>` create/update/
+  delete routes (coupons, promotions, shipping, pages, content/social,
+  content/homepage, redirects). Their forms post there — never add a UI screen
+  without its route, or saves silently 404.
+- Admin Promotions drive the storefront: `placement: "announcement"` renders the
+  dismissible `AnnouncementBar` in the storefront layout; `placement: "home_banner"`
+  renders an editorial section on the homepage.
+- SEO redirects are enforced in `src/middleware.ts` via `src/lib/redirects.ts`,
+  which reads the cached, edge-safe `GET /api/redirects-map`. The map caches for
+  ~60s, so a redirect change may take up to a minute to go live; hit counts raise
+  via `POST /api/redirects-map` off the hot path.
+- Admin APIs are mutation-only. Admin pages read data through server components,
+  so `GET /api/admin/...` returning 405/404 is expected.
+
 ## Deployment
 - cPanel target: see `DEPLOYMENT.md`. Entry point is `server.js` (Passenger).
 - Baseline Prisma migration is committed at `prisma/migrations/0_init`.
