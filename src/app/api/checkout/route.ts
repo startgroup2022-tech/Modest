@@ -33,6 +33,28 @@ export async function POST(req: NextRequest) {
   }
 
   const user = await getCurrentUser();
+
+  // Replay a previous submission before touching the cart. A double-tap or
+  // network retry clears the bag on the first request, so without this the
+  // retry would fail with "bag is empty" instead of the original confirmation.
+  const idempotencyKey = req.headers.get('idempotency-key');
+  if (idempotencyKey) {
+    const existing = await prisma.order.findUnique({
+      where: { idempotencyKey },
+      include: { payments: { orderBy: { createdAt: 'desc' }, take: 1 } },
+    });
+    if (existing) {
+      return NextResponse.json({
+        ok: true,
+        orderId: existing.id,
+        orderNumber: existing.orderNumber,
+        paymentStatus: existing.payments[0]?.status ?? 'PENDING',
+        redirectUrl: null,
+        instructions: null,
+      });
+    }
+  }
+
   const cart = await getCartView();
   if (!cart.items.length) {
     return NextResponse.json({ error: 'Your bag is empty' }, { status: 400 });
@@ -76,7 +98,6 @@ export async function POST(req: NextRequest) {
   }
 
   const currency = await getSelectedCurrency();
-  const idempotencyKey = req.headers.get('idempotency-key');
 
   try {
     const lines = await resolveCartLines(
