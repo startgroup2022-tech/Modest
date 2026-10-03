@@ -10,7 +10,7 @@ import { ProductGridSkeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
-import { seoTitle } from '@/lib/seo';
+import { seoTitle, jsonLdHtml } from '@/lib/seo';
 
 export async function generateMetadata({
   params,
@@ -78,7 +78,7 @@ export default async function CollectionDetailPage({
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdHtml(breadcrumbJsonLd) }} />
 
       {/* Editorial collection hero */}
       <section className="relative bg-ink text-paper">

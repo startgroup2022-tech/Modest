@@ -1,3 +1,4 @@
+import { jsonLdHtml } from '@/lib/seo';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Metadata } from 'next';
@@ -43,7 +44,7 @@ export default async function AboutPage({ params }: { params: Promise<{ locale: 
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(orgJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdHtml(orgJsonLd) }} />
 
       <section className="relative bg-ink text-paper">
         <div className="relative h-[46svh] min-h-[340px] w-full overflow-hidden md:h-[56svh]">

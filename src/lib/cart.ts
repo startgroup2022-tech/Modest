@@ -102,7 +102,26 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
     if (!product || product.status !== 'ACTIVE') continue;
     const variant = item.variantId ? product.variants.find((v) => v.id === item.variantId) : null;
     const unitPriceBhd = Number(variant?.priceBhd ?? product.priceBhd);
-    const stockStatus = variant?.stockStatus ?? (product.madeToOrder ? 'PRE_ORDER' : 'IN_STOCK');
+
+    let stockStatus: string;
+    let available: boolean;
+    if (item.variantId) {
+      if (!variant || !variant.isActive) {
+        stockStatus = 'OUT_OF_STOCK';
+        available = false;
+      } else {
+        stockStatus = variant.stockStatus;
+        available =
+          variant.stockStatus !== 'OUT_OF_STOCK' &&
+          (variant.stock > 0 || variant.stockStatus === 'PRE_ORDER');
+      }
+    } else {
+      // Made-to-order pieces are producible on demand; ready-to-wear items
+      // without variants carry no stock counter, so they stay available.
+      stockStatus = product.madeToOrder ? 'PRE_ORDER' : 'IN_STOCK';
+      available = true;
+    }
+
     lines.push({
       id: item.id,
       productId: product.id,
@@ -118,11 +137,13 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
       unitPriceBhd,
       lineTotalBhd: Math.round(unitPriceBhd * item.quantity * 1000) / 1000,
       stockStatus,
-      available: stockStatus !== 'OUT_OF_STOCK',
+      available,
     });
   }
-  const subtotalBhd = Math.round(lines.reduce((s, l) => s + l.lineTotalBhd, 0) * 1000) / 1000;
-  return { id: cartId, items: lines, count: lines.reduce((s, l) => s + l.quantity, 0), subtotalBhd };
+  // Unavailable pieces must not contribute to the subtotal the buyer sees.
+  const purchasable = lines.filter((l) => l.available);
+  const subtotalBhd = Math.round(purchasable.reduce((s, l) => s + l.lineTotalBhd, 0) * 1000) / 1000;
+  return { id: cartId, items: lines, count: purchasable.reduce((s, l) => s + l.quantity, 0), subtotalBhd };
 }
 
 export async function addToCart(productId: string, variantId: string | null, quantity: number) {
@@ -133,18 +154,30 @@ export async function addToCart(productId: string, variantId: string | null, qua
   });
   if (!product) throw new Error('PRODUCT_UNAVAILABLE');
   if (product.variants.length > 0 && !variantId) throw new Error('VARIANT_REQUIRED');
-  if (variantId && !product.variants.some((v) => v.id === variantId && v.isActive)) {
-    throw new Error('VARIANT_UNAVAILABLE');
+
+  // Stock is enforced here as well as at checkout so an unavailable size can
+  // never be added (or silently incremented past what is on hand).
+  let maxQty = 20;
+  if (variantId) {
+    const variant = product.variants.find((v) => v.id === variantId && v.isActive);
+    if (!variant) throw new Error('VARIANT_UNAVAILABLE');
+    if (variant.stockStatus === 'OUT_OF_STOCK') throw new Error('VARIANT_UNAVAILABLE');
+    if (variant.stockStatus === 'PRE_ORDER' || product.madeToOrder) {
+      maxQty = 20;
+    } else {
+      if (variant.stock < 1) throw new Error('VARIANT_UNAVAILABLE');
+      maxQty = Math.min(20, variant.stock);
+    }
   }
 
   const existing = await prisma.cartItem.findFirst({
     where: { cartId, productId, variantId: variantId ?? null },
   });
-  const nextQty = Math.min(20, (existing?.quantity ?? 0) + quantity);
+  const nextQty = Math.min(maxQty, (existing?.quantity ?? 0) + quantity);
   if (existing) {
     await prisma.cartItem.update({ where: { id: existing.id }, data: { quantity: nextQty } });
   } else {
-    await prisma.cartItem.create({ data: { cartId, productId, variantId: variantId ?? null, quantity: Math.min(20, quantity) } });
+    await prisma.cartItem.create({ data: { cartId, productId, variantId: variantId ?? null, quantity: Math.min(maxQty, quantity) } });
   }
   return getCartView();
 }

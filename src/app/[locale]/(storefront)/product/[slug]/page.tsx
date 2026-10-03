@@ -13,7 +13,7 @@ import { Price } from '@/components/ui/Price';
 import { ArrowRight, WhatsAppIcon } from '@/components/ui/icons';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
-import { seoTitle } from '@/lib/seo';
+import { seoTitle, jsonLdHtml } from '@/lib/seo';
 
 export async function generateMetadata({
   params,
@@ -151,8 +151,8 @@ export default async function ProductPage({
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdHtml(productJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdHtml(breadcrumbJsonLd) }} />
 
       <div className="shell pt-8 md:pt-12">
         <nav aria-label="Breadcrumb" className="mb-6">

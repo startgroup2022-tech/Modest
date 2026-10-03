@@ -1,3 +1,4 @@
+import { jsonLdHtml } from '@/lib/seo';
 import { getStoreInfo, getSocialLinks } from '@/lib/site';
 import { isLocale, type Locale } from '@/i18n/config';
 
@@ -43,11 +44,11 @@ export async function SiteJsonLd({ locale }: { locale: Locale }) {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(organization) }}
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml(organization) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(website) }}
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml(website) }}
       />
     </>
   );

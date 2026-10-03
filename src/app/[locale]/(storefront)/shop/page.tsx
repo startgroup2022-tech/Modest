@@ -11,7 +11,7 @@ import { ShopFilters, SortSelect } from '@/components/shop/ShopFilters';
 import { Pagination } from '@/components/shop/Pagination';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
-import { seoTitle } from '@/lib/seo';
+import { seoTitle, jsonLdHtml } from '@/lib/seo';
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -125,7 +125,7 @@ export default async function ShopPage({
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdHtml(itemListJsonLd) }} />
 
       <div className="shell pt-10 md:pt-14">
         <nav aria-label="Breadcrumb" className="mb-6">
