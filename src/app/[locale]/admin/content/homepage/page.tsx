@@ -32,8 +32,8 @@ export default async function HomepageContentPage({ params }: { params: Promise<
     { key: 'ctaLabelEn', label: `${dict.content.ctaLabel} (EN)` },
     { key: 'ctaLabelAr', label: `${dict.content.ctaLabel} (AR)` },
     { key: 'ctaHref', label: dict.content.ctaHref },
-    { key: 'imageUrl', label: dict.content.image },
-    { key: 'mobileImageUrl', label: dict.content.mobileImage },
+    { key: 'imageUrl', label: dict.content.image, type: 'image' },
+    { key: 'mobileImageUrl', label: dict.content.mobileImage, type: 'image' },
     { key: 'isActive', label: dict.common.enabled, type: 'checkbox' },
   ];
 
@@ -72,7 +72,7 @@ export default async function HomepageContentPage({ params }: { params: Promise<
                       </td>
                       <td data-label={dict.common.actions}>
                         <Drawer trigger={dict.common.edit} title={dict.content.section} wide>
-                          <ResourceForm endpoint="/api/admin/content/homepage" initial={initial} fields={fields()} dict={{ common: dict.common }} transformKey="homepage" />
+                          <ResourceForm endpoint="/api/admin/content/homepage" initial={initial} fields={fields()} dict={{ common: dict.common }} transformKey="homepage" locale={locale} />
                         </Drawer>
                       </td>
                     </tr>

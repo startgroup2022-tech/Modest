@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface Media {
@@ -23,11 +23,13 @@ export function ProductMediaManager({
   dict: { products: Record<string, string>; common: Record<string, string> };
 }) {
   const router = useRouter();
+  const fileRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState('');
   const [altEn, setAltEn] = useState('');
   const [altAr, setAltAr] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const t = (en: string, ar: string) => (locale === 'ar' ? ar : en);
 
   async function call(method: 'POST' | 'PATCH' | 'DELETE', body?: Record<string, unknown>, id?: string) {
     setBusy(true);
@@ -60,6 +62,40 @@ export function ProductMediaManager({
     setAltAr('');
   }
 
+  async function uploadFile(file: File) {
+    setBusy(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/admin/media', { method: 'POST', body: form });
+      const out = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!res.ok || !out.url) {
+        setError(out.error ?? t('Upload failed', 'فشل الرفع'));
+        return;
+      }
+      await call('POST', { url: out.url, altEn, altAr, isPrimary: media.length === 0 });
+      setAltEn('');
+      setAltAr('');
+    } catch {
+      setError(t('Network error', 'خطأ في الشبكة'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(m: Media) {
+    await call('DELETE', undefined, m.id);
+    // Best-effort cleanup of the stored file; ignored for externally-hosted URLs.
+    if (m.url.startsWith('/uploads/')) {
+      await fetch('/api/admin/media', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: m.url }),
+      }).catch(() => {});
+    }
+  }
+
   return (
     <div>
       {media.length > 0 ? (
@@ -86,7 +122,7 @@ export function ProductMediaManager({
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => call('DELETE', undefined, m.id)}
+                  onClick={() => remove(m)}
                   className="text-caption text-danger"
                 >
                   {dict.common.delete}
@@ -105,9 +141,25 @@ export function ProductMediaManager({
           <input value={altEn} onChange={(e) => setAltEn(e.target.value)} placeholder={`${dict.products.altText} (EN)`} className="adm-input" />
           <input value={altAr} onChange={(e) => setAltAr(e.target.value)} placeholder={`${dict.products.altText} (AR)`} className="adm-input" />
         </div>
-        <button type="submit" disabled={busy} className="adm-btn-outline">
-          + {dict.products.media}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" disabled={busy} className="adm-btn-outline">
+            + {dict.products.media}
+          </button>
+          <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className="adm-btn-outline">
+            {busy ? t('Working…', 'جارٍ العمل…') : t('Upload file', 'رفع ملف')}
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/avif,image/gif"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void uploadFile(file);
+            e.target.value = '';
+          }}
+        />
         {error && <p className="text-caption text-danger">{error}</p>}
       </form>
     </div>

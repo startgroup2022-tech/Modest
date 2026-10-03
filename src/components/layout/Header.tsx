@@ -20,11 +20,13 @@ export function Header({
   dict,
   categories,
   collections,
+  logoUrl,
 }: {
   locale: Locale;
   dict: Dict;
   categories: { slug: string; name: string }[];
   collections: { slug: string; name: string }[];
+  logoUrl?: string | null;
 }) {
   const { cart, wishlist, setCartOpen, setSearchOpen } = useStore();
   const pathname = usePathname();
@@ -96,7 +98,7 @@ export function Header({
 
           {/* Logo — centred on mobile, left on desktop */}
           <div className="flex flex-1 justify-center lg:flex-none lg:justify-start">
-            <Logo href={p('')} />
+            <Logo href={p('')} logoUrl={logoUrl} />
           </div>
 
           {/* Utilities */}
@@ -170,7 +172,7 @@ export function Header({
           )}
         >
           <div className="flex h-[var(--header-h)] items-center justify-between border-b border-line px-5">
-            <Logo href={p('')} />
+            <Logo href={p('')} logoUrl={logoUrl} />
             <button
               type="button"
               onClick={() => setMenuOpen(false)}

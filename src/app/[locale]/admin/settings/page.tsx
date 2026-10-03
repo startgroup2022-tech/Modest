@@ -56,6 +56,20 @@ export default async function SettingsPage({
     { key: 'city', label: s.city },
     { key: 'country', label: s.country },
     { key: 'timezone', label: s.timezone },
+    {
+      key: 'logoUrl',
+      label: locale === 'ar' ? 'الشعار' : 'Logo',
+      type: 'image',
+      full: true,
+      help: locale === 'ar' ? 'اتركه فارغًا لاستخدام شعار النص.' : 'Leave empty to use the typographic wordmark.',
+    },
+    {
+      key: 'faviconUrl',
+      label: locale === 'ar' ? 'أيقونة الموقع' : 'Favicon',
+      type: 'image',
+      full: true,
+      help: locale === 'ar' ? 'اتركه فارغًا للأيقونة الافتراضية.' : 'Leave empty for the built-in icon.',
+    },
     { key: 'leadTimeEn', label: s.leadTimeEn, type: 'textarea', full: true },
     { key: 'leadTimeAr', label: s.leadTimeAr, type: 'textarea', full: true },
   ];
@@ -110,7 +124,7 @@ export default async function SettingsPage({
       {tab === 'general' && (
         <div className="grid gap-6">
           <Panel title={s.store}>
-            <SettingForm settingKey="store" initial={store} fields={storeFields} dict={{ common: dict.common, settings: s }} />
+            <SettingForm settingKey="store" initial={store} fields={storeFields} dict={{ common: dict.common, settings: s }} locale={locale} />
           </Panel>
           <Panel title={s.checkout}>
             <SettingForm settingKey="checkout" initial={checkout} fields={checkoutFields} dict={{ common: dict.common, settings: s }} />

@@ -3,11 +3,12 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TRANSFORMS } from './transforms';
+import { ImageField } from './ImageField';
 
 export interface FieldDef {
   key: string;
   label: string;
-  type?: 'text' | 'number' | 'textarea' | 'select' | 'checkbox' | 'date' | 'email' | 'url';
+  type?: 'text' | 'number' | 'textarea' | 'select' | 'checkbox' | 'date' | 'email' | 'url' | 'image';
   options?: { value: string; label: string }[];
   step?: string;
   placeholder?: string;
@@ -27,6 +28,7 @@ export function ResourceForm({
   dict,
   redirectTo,
   transformKey,
+  locale = 'en',
 }: {
   endpoint: string;
   initial: Record<string, unknown>;
@@ -35,6 +37,7 @@ export function ResourceForm({
   redirectTo?: string;
   /** Key into {@link TRANSFORMS} for server-safe payload coercion. */
   transformKey?: string;
+  locale?: 'en' | 'ar';
 }) {
   const router = useRouter();
   const c = dict.common;
@@ -102,6 +105,12 @@ export function ResourceForm({
                   rows={4}
                   className="adm-input mt-1 resize-y"
                   placeholder={f.placeholder}
+                />
+              ) : f.type === 'image' ? (
+                <ImageField
+                  value={String(data[f.key] ?? '')}
+                  onChange={(url) => set(f.key, url)}
+                  locale={locale}
                 />
               ) : f.type === 'select' ? (
                 <select value={String(data[f.key] ?? '')} onChange={(e) => set(f.key, e.target.value)} className="adm-select mt-1">

@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ImageField } from './ImageField';
 
 export interface SettingField {
   key: string;
   label: string;
-  type?: 'text' | 'textarea' | 'checkbox' | 'email' | 'url' | 'password';
+  type?: 'text' | 'textarea' | 'checkbox' | 'email' | 'url' | 'password' | 'image';
   full?: boolean;
   placeholder?: string;
   help?: string;
@@ -22,11 +23,13 @@ export function SettingForm({
   initial,
   fields,
   dict,
+  locale = 'en',
 }: {
   settingKey: string;
   initial: Record<string, unknown>;
   fields: SettingField[];
   dict: { common: Record<string, string>; settings?: Record<string, string> };
+  locale?: 'en' | 'ar';
 }) {
   const router = useRouter();
   const c = dict.common;
@@ -78,6 +81,8 @@ export function SettingForm({
               <span className="adm-kpi-label">{f.label}</span>
               {f.type === 'textarea' ? (
                 <textarea rows={3} value={String(data[f.key] ?? '')} onChange={(e) => set(f.key, e.target.value)} className="adm-input mt-1 resize-y" placeholder={f.placeholder} />
+              ) : f.type === 'image' ? (
+                <ImageField value={String(data[f.key] ?? '')} onChange={(url) => set(f.key, url)} locale={locale} />
               ) : (
                 <input
                   type={f.type ?? 'text'}

@@ -60,6 +60,7 @@ export default async function StorefrontLayout({
           dict={ctx.dict}
           categories={ctx.categories.map((c) => ({ slug: c.slug, name: c.name }))}
           collections={ctx.collections.map((c) => ({ slug: c.slug, name: c.name }))}
+          logoUrl={ctx.store.logoUrl}
         />
         <main id="main" className="flex-1">
           {children}
