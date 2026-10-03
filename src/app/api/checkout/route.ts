@@ -1,0 +1,124 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { getCurrentUser } from '@/lib/auth';
+import { getCartView, clearCart } from '@/lib/cart';
+import { getSelectedCurrency } from '@/lib/currency';
+import { checkoutSchema } from '@/lib/validation';
+import { createOrder, resolveCartLines, CheckoutError } from '@/lib/orders';
+import { rateLimit } from '@/lib/rate-limit';
+import { writeAudit } from '@/lib/audit';
+import type { CouponLike } from '@/lib/money';
+
+export const dynamic = 'force-dynamic';
+
+const VALID_COUPON_INCLUDE = { id: true, code: true, discountType: true, valueBhd: true, minOrderBhd: true, maxDiscountBhd: true, usageLimit: true, usedCount: true, startsAt: true, expiresAt: true, isActive: true } as const;
+
+export async function POST(req: NextRequest) {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const limit = rateLimit(`checkout:${ip}`, 12, 60_000);
+  if (!limit.ok) return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 });
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+  }
+  const parsed = checkoutSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error.issues[0]?.message ?? 'Invalid input', field: parsed.error.issues[0]?.path?.[0] },
+      { status: 400 },
+    );
+  }
+
+  const user = await getCurrentUser();
+  const cart = await getCartView();
+  if (!cart.items.length) {
+    return NextResponse.json({ error: 'Your bag is empty' }, { status: 400 });
+  }
+
+  // Coupon is validated server-side against the database, never trusted from the client.
+  let coupon: (CouponLike & { id: string }) | null = null;
+  const couponCode = parsed.data.couponCode?.trim().toUpperCase();
+  if (couponCode) {
+    const now = new Date();
+    const row = await prisma.coupon.findUnique({ where: { code: couponCode }, select: VALID_COUPON_INCLUDE });
+    const valid =
+      row &&
+      row.isActive &&
+      (!row.startsAt || row.startsAt <= now) &&
+      (!row.expiresAt || row.expiresAt >= now) &&
+      (row.usageLimit == null || row.usedCount < row.usageLimit);
+    if (valid && row) {
+      coupon = {
+        id: row.id,
+        discountType: row.discountType,
+        valueBhd: Number(row.valueBhd),
+        minOrderBhd: row.minOrderBhd != null ? Number(row.minOrderBhd) : null,
+        maxDiscountBhd: row.maxDiscountBhd != null ? Number(row.maxDiscountBhd) : null,
+      };
+    } else {
+      return NextResponse.json({ error: 'This promo code is not valid', field: 'couponCode' }, { status: 400 });
+    }
+  }
+
+  // Shipping is chosen server-side from the DB by code; the price is never client-supplied.
+  let shippingBhd = 0;
+  if (parsed.data.shippingMethodCode) {
+    const method = await prisma.shippingMethod.findFirst({
+      where: { code: parsed.data.shippingMethodCode, isActive: true },
+    });
+    if (method) shippingBhd = Number(method.priceBhd);
+  } else {
+    const fallback = await prisma.shippingMethod.findFirst({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } });
+    shippingBhd = fallback ? Number(fallback.priceBhd) : 0;
+  }
+
+  const currency = await getSelectedCurrency();
+  const idempotencyKey = req.headers.get('idempotency-key');
+
+  try {
+    const lines = await resolveCartLines(
+      cart.items.map((i) => ({ productId: i.productId, variantId: i.variantId, quantity: i.quantity })),
+    );
+
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? req.nextUrl.origin;
+    const order = await createOrder({
+      checkout: parsed.data,
+      lines,
+      customerId: user?.customerId ?? null,
+      locale: req.nextUrl.searchParams.get('locale') === 'ar' ? 'ar' : 'en',
+      currency: { code: currency.code, rateToBhd: currency.rateToBhd, decimals: currency.decimals },
+      shippingBhd,
+      coupon,
+      idempotencyKey,
+      baseUrl,
+    });
+
+    await clearCart();
+    await writeAudit({
+      userId: user?.id ?? null,
+      action: 'order.created',
+      entity: 'Order',
+      entityId: order.orderId,
+      metadata: { orderNumber: order.orderNumber, totalBhd: order.totalBhd, method: parsed.data.paymentMethod },
+      ip,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      orderId: order.orderId,
+      orderNumber: order.orderNumber,
+      paymentStatus: order.paymentStatus,
+      redirectUrl: order.redirectUrl ?? null,
+      instructions: order.instructions ?? null,
+    });
+  } catch (err) {
+    if (err instanceof CheckoutError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 400 });
+    }
+    console.error('[checkout] failed', err);
+    return NextResponse.json({ error: 'We could not place your order. Please try again.' }, { status: 500 });
+  }
+}

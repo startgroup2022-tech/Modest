@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Attention">
+  <rect width="64" height="64" fill="#0A0A0A"/>
+  <path d="M20 46 L32 18 L44 46" fill="none" stroke="#F6F1E9" stroke-width="2.5" stroke-linecap="square"/>
+  <line x1="24.5" y1="37" x2="39.5" y2="37" stroke="#F6F1E9" stroke-width="2.5"/>
+</svg>

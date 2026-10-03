@@ -1,0 +1,252 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --shell-x: clamp(1rem, 5vw, 4.5rem);
+    --header-h: 72px;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  html[dir='rtl'] body {
+    @apply font-ar;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-sans font-medium;
+    text-wrap: balance;
+  }
+
+  html[dir='rtl'] h1,
+  html[dir='rtl'] h2,
+  html[dir='rtl'] h3,
+  html[dir='rtl'] h4 {
+    @apply font-ar;
+  }
+
+  ::selection {
+    @apply bg-ink text-paper;
+  }
+
+  :focus-visible {
+    outline: 2px solid theme('colors.ink.DEFAULT');
+    outline-offset: 3px;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+  }
+
+  /* Hide number input spinners for a cleaner editorial look */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  .shell {
+    width: 100%;
+    max-width: theme('maxWidth.shell');
+    margin-inline: auto;
+    padding-inline: var(--shell-x);
+  }
+
+  .shell-narrow {
+    width: 100%;
+    max-width: theme('maxWidth.content');
+    margin-inline: auto;
+    padding-inline: var(--shell-x);
+  }
+
+  .eyebrow {
+    @apply text-label uppercase tracking-luxe text-ink-muted;
+  }
+
+  .rule {
+    @apply h-px w-full bg-line;
+  }
+
+  .link-underline {
+    @apply relative inline-block;
+  }
+  .link-underline::after {
+    content: '';
+    @apply absolute bottom-0 start-0 h-px w-full origin-[0_50%] scale-x-0 bg-current transition-transform duration-500 ease-luxe;
+  }
+  .link-underline:hover::after,
+  .link-underline:focus-visible::after {
+    @apply scale-x-100;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-8 py-4 text-btn uppercase transition-all duration-300 ease-luxe disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-primary {
+    @apply btn bg-ink text-paper hover:bg-ink-soft;
+  }
+  .btn-outline {
+    @apply btn border border-ink bg-transparent text-ink hover:bg-ink hover:text-paper;
+  }
+  .btn-quiet {
+    @apply btn border border-line bg-transparent text-ink hover:border-ink;
+  }
+  .btn-block {
+    @apply w-full;
+  }
+
+  .field {
+    @apply w-full border border-line bg-paper px-4 py-3.5 text-small text-ink transition-colors duration-200 placeholder:text-ink-faint focus:border-ink focus:outline-none;
+  }
+  .field-label {
+    @apply mb-2 block text-label uppercase tracking-luxe text-ink-muted;
+  }
+  .field-error {
+    @apply mt-1.5 text-caption text-danger;
+  }
+
+  .chip {
+    @apply inline-flex items-center border border-line px-3 py-1.5 text-caption uppercase tracking-[0.12em] text-ink-muted transition-colors duration-200;
+  }
+  .chip-active {
+    @apply border-ink bg-ink text-paper;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden bg-sand-100;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/60 to-transparent;
+  }
+
+  .surface {
+    @apply border border-line bg-paper;
+  }
+
+  .container-pad {
+    padding-inline: var(--shell-x);
+  }
+}
+
+@layer utilities {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .hover-zoom img {
+    @apply transition-transform duration-[900ms] ease-luxe;
+  }
+  .hover-zoom:hover img {
+    transform: scale(1.045);
+  }
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Prevent horizontal overflow on mobile */
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+/* RTL-aware marquee for the announcement bar */
+@keyframes marquee-rtl {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee-track {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: marquee-rtl 40s linear infinite;
+}
+html[dir='rtl'] .marquee-track {
+  animation-direction: reverse;
+}
+
+/* Product description rich text */
+.prose-luxe {
+  @apply text-body text-ink-muted;
+}
+.prose-luxe h2 {
+  @apply mt-10 mb-3 text-h3 text-ink;
+}
+.prose-luxe h3 {
+  @apply mt-8 mb-2 text-h4 text-ink;
+}
+.prose-luxe p {
+  @apply mb-4;
+}
+.prose-luxe ul {
+  @apply mb-4 list-disc ps-5;
+}
+.prose-luxe li {
+  @apply mb-1.5;
+}
+.prose-luxe table {
+  @apply my-6 w-full border-collapse text-small;
+}
+.prose-luxe th,
+.prose-luxe td {
+  @apply border border-line px-3 py-2.5 text-start;
+}
+.prose-luxe th {
+  @apply bg-sand-50 font-medium text-ink;
+}
+.prose-luxe a {
+  @apply underline;
+}
