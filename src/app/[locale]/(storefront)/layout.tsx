@@ -7,9 +7,11 @@ import { SearchOverlay } from '@/components/search/SearchOverlay';
 import { Toast } from '@/components/ui/Toast';
 import { StoreProvider } from '@/components/providers/StoreProvider';
 import { getStorefrontContext } from '@/lib/storefront';
+import { getActivePromotions } from '@/lib/site';
 import { getCurrentUser } from '@/lib/auth';
 import { isLocale } from '@/i18n/config';
 import { SiteJsonLd } from '@/components/seo/SiteJsonLd';
+import { AnnouncementBar } from '@/components/layout/AnnouncementBar';
 
 export default async function StorefrontLayout({
   children,
@@ -21,7 +23,21 @@ export default async function StorefrontLayout({
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
 
-  const [ctx, user] = await Promise.all([getStorefrontContext(locale), getCurrentUser()]);
+  const [ctx, user, promotions] = await Promise.all([
+    getStorefrontContext(locale),
+    getCurrentUser(),
+    getActivePromotions(),
+  ]);
+  const announcements = promotions
+    .filter((p) => p.placement === 'announcement')
+    .map((p) => ({
+      id: p.id,
+      titleEn: p.titleEn,
+      titleAr: p.titleAr,
+      ctaLabelEn: p.ctaLabelEn,
+      ctaLabelAr: p.ctaLabelAr,
+      ctaHref: p.ctaHref,
+    }));
 
   return (
     <StoreProvider
@@ -32,6 +48,7 @@ export default async function StorefrontLayout({
     >
       <SiteJsonLd locale={locale} />
       <div className="flex min-h-screen flex-col">
+        <AnnouncementBar promos={announcements} locale={locale} />
         <a
           href="#main"
           className="sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-[100] focus:bg-ink focus:px-4 focus:py-2 focus:text-caption focus:text-paper"
