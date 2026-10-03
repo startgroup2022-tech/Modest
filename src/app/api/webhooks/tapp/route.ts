@@ -47,6 +47,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Order not found' }, { status: 404 });
   }
 
+  // A valid signature proves the sender, not the amount. Refuse to settle an
+  // order when the gateway reports a total that does not match what we charged.
+  if (result.status === 'PAID' && typeof result.amountBhd === 'number') {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { totalBhd: true },
+    });
+    const expected = Number(order?.totalBhd ?? 0);
+    if (Math.abs(expected - result.amountBhd) > 0.01) {
+      return NextResponse.json({ error: 'Amount mismatch' }, { status: 400 });
+    }
+  }
+
   try {
     await applyPaymentResult({
       orderId,
