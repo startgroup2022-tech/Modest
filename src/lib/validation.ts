@@ -34,6 +34,21 @@ export const signUpSchema = z
     path: ['confirmPassword'],
   });
 
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required').max(128),
+    newPassword: passwordSchema,
+    confirmPassword: z.string(),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  })
+  .refine((d) => d.newPassword !== d.currentPassword, {
+    message: 'Choose a password different from your current one',
+    path: ['newPassword'],
+  });
+
 const phoneRegex = /^[+]?[\d\s()-]{7,20}$/;
 
 export const checkoutSchema = z.object({

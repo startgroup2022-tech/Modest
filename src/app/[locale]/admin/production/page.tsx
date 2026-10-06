@@ -34,9 +34,10 @@ export default async function ProductionPage({ params }: { params: Promise<{ loc
   return (
     <>
       <PageHeader title={dict.production.title} subtitle={dict.production.subtitle} />
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Kpi label={dict.production.queue} value={formatNumber(countOf(['PENDING', 'ASSIGNED']), locale)} tone="warn" />
-        <Kpi label={locale === 'ar' ? 'قيد التنفيذ' : 'In progress'} value={formatNumber(countOf(['IN_PROGRESS']), locale)} />
+        <Kpi label={locale === 'ar' ? 'قيد التنفيذ' : 'In progress'} value={formatNumber(countOf(['ACCEPTED', 'IN_PROGRESS']), locale)} />
+        <Kpi label={locale === 'ar' ? 'بانتظار الفحص' : 'Awaiting QC'} value={formatNumber(countOf(['SUBMITTED_FOR_QC']), locale)} tone="warn" />
         <Kpi label={dict.production.rework} value={formatNumber(countOf(['REWORK']), locale)} tone="danger" />
         <Kpi label={dict.production.complete} value={formatNumber(countOf(['COMPLETED']), locale)} tone="success" />
       </div>

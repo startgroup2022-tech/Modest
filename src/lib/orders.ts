@@ -1,7 +1,8 @@
 import 'server-only';
 import { prisma } from './prisma';
 import { computeTotals, type CouponLike } from './money';
-import { generateOrderNumber, roundBhd } from './utils';
+import { roundBhd } from './utils';
+import { nextSequence, monthlyScope } from './sequences';
 import { getPaymentProvider, type PaymentInitResult } from './payments';
 import type { CheckoutInput } from './validation';
 import type { OrderStatus, Prisma, PaymentStatus } from '@prisma/client';
@@ -158,9 +159,15 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
   const presentmentTotal = roundBhd(totals.totalBhd * input.currency.rateToBhd);
 
   const order = await prisma.$transaction(async (tx) => {
+    const orderNumber = await nextSequence(tx, {
+      key: `order:${monthlyScope()}`,
+      prefix: 'ATT',
+      scope: monthlyScope(),
+      pad: 6,
+    });
     const created = await tx.order.create({
       data: {
-        orderNumber: generateOrderNumber(),
+        orderNumber,
         customerId: input.customerId,
         email: checkout.email,
         phone: checkout.phone,

@@ -23,7 +23,7 @@ export default async function QcPage({ params }: { params: Promise<{ locale: str
       take: 100,
       include: { task: { select: { code: true, titleEn: true, titleAr: true } }, checkedBy: { select: { firstName: true, lastName: true, email: true } } },
     }),
-    prisma.productionTask.count({ where: { status: { in: ['IN_PROGRESS', 'REWORK'] } } }),
+    prisma.productionTask.count({ where: { status: { in: ['IN_PROGRESS', 'SUBMITTED_FOR_QC', 'REWORK'] } } }),
   ]);
 
   return (

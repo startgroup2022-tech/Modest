@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth';
+import { requireUser, hashPassword, verifyPassword } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { addressSchema, measurementSchema, profileSchema } from '@/lib/validation';
+import { addressSchema, changePasswordSchema, measurementSchema, profileSchema } from '@/lib/validation';
+import { rateLimit } from '@/lib/rate-limit';
+import { writeAudit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,6 +85,34 @@ export async function POST(req: NextRequest) {
       ? await prisma.measurement.update({ where: { id: existing.id }, data })
       : await prisma.measurement.create({ data: { customerId: user.customerId, isDefault: true, ...data } });
     return NextResponse.json({ ok: true, measurement });
+  }
+
+  if (kind === 'password') {
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+    const limit = rateLimit(`password:${user.id}:${ip}`, 6, 15 * 60_000);
+    if (!limit.ok) {
+      return NextResponse.json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+    }
+    const parsed = changePasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? 'Invalid password', field: parsed.error.issues[0]?.path?.[0] },
+        { status: 400 },
+      );
+    }
+    // The current password is required and verified server-side; a session
+    // alone is not enough to change the credential.
+    const account = await prisma.user.findUnique({ where: { id: user.id }, select: { passwordHash: true } });
+    if (!account?.passwordHash || !(await verifyPassword(parsed.data.currentPassword, account.passwordHash))) {
+      await writeAudit({ userId: user.id, action: 'account.password_change_failed', entity: 'User', entityId: user.id, metadata: {}, ip });
+      return NextResponse.json({ error: 'Your current password is incorrect', field: 'currentPassword' }, { status: 400 });
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await hashPassword(parsed.data.newPassword) },
+    });
+    await writeAudit({ userId: user.id, action: 'account.password_change', entity: 'User', entityId: user.id, metadata: {}, ip });
+    return NextResponse.json({ ok: true });
   }
 
   if (kind === 'profile') {

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import { ChevronDown } from '@/components/ui/icons';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 export interface AccordionItem {
   title: string;
@@ -40,7 +41,7 @@ export function Accordion({ items }: { items: AccordionItem[] }) {
               )}
             >
               <div className="overflow-hidden">
-                <div className="prose-luxe pb-6 text-small text-ink-muted" dangerouslySetInnerHTML={{ __html: item.body }} />
+                <div className="prose-luxe pb-6 text-small text-ink-muted" dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.body) }} />
               </div>
             </div>
           </div>

@@ -20,6 +20,9 @@ enum RoleName {
   MANAGER
   SUPPORT
   CUSTOMER
+  // Tailor Portal accounts authenticate against the same session machinery but
+  // are limited to their own assigned work; see TailorCredential.
+  TAILOR
 }
 
 enum EmployeeStatus {
@@ -78,6 +81,7 @@ model User {
   inventoryMovements     InventoryMovement[] @relation("InventoryActor")
   qcRecords              QcRecord[]          @relation("QcChecker")
   ordersCreated          Order[]             @relation("OrderCreator")
+  quickOrderLinksCreated QuickOrderLink[]    @relation("QuickOrderLinkCreator")
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
@@ -106,20 +110,27 @@ model AuditLog {
 // ───────────────────────────────────────────────────────────
 
 model Customer {
-  id               String         @id @default(cuid())
-  userId           String         @unique
-  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String          @id @default(cuid())
+  userId           String          @unique
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   phone            String?
-  defaultLocale    String         @default("en")
-  acceptsMarketing Boolean        @default(false)
+  defaultLocale    String          @default("en")
+  acceptsMarketing Boolean         @default(false)
+  // Optional cached membership pointer. The authoritative tier is *derived*
+  // from qualifying paid, non-refunded items; this column only caches the last
+  // computed tier so lists do not recompute on every render.
+  membershipTierId String?
+  membershipTier   MembershipTier? @relation(fields: [membershipTierId], references: [id], onDelete: SetNull)
   addresses        Address[]
   measurements     Measurement[]
   orders           Order[]
   wishlist         WishlistItem[]
   cart             Cart?
   notifications    Notification[]
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([membershipTierId])
 }
 
 model Address {
@@ -143,27 +154,37 @@ model Address {
   @@index([customerId])
 }
 
-// Body measurements used for made-to-order tailoring (values in cm)
+// Body measurements used for made-to-order tailoring.
+//
+// Legacy fixed columns (height/shoulder/…) are retained so existing rows and
+// screens keep working. New profiles additionally carry `cutId` plus a JSON
+// `values` map keyed by MeasurementField.key, which is what the size-guide
+// foundation reads. An order always snapshots its own copy, so editing a
+// profile here never alters a previous order.
 model Measurement {
-  id         String   @id @default(cuid())
+  id         String      @id @default(cuid())
   customerId String
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  name       String   @default("My measurements")
-  unit       String   @default("cm")
-  height     Decimal? @db.Decimal(6, 2)
-  shoulder   Decimal? @db.Decimal(6, 2)
-  bust       Decimal? @db.Decimal(6, 2)
-  waist      Decimal? @db.Decimal(6, 2)
-  hip        Decimal? @db.Decimal(6, 2)
-  sleeve     Decimal? @db.Decimal(6, 2)
-  armhole    Decimal? @db.Decimal(6, 2)
-  length     Decimal? @db.Decimal(6, 2)
+  customer   Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name       String      @default("My measurements")
+  unit       String      @default("cm")
+  cutId      String?
+  cut        ProductCut? @relation(fields: [cutId], references: [id])
+  values     Json?
+  height     Decimal?    @db.Decimal(6, 2)
+  shoulder   Decimal?    @db.Decimal(6, 2)
+  bust       Decimal?    @db.Decimal(6, 2)
+  waist      Decimal?    @db.Decimal(6, 2)
+  hip        Decimal?    @db.Decimal(6, 2)
+  sleeve     Decimal?    @db.Decimal(6, 2)
+  armhole    Decimal?    @db.Decimal(6, 2)
+  length     Decimal?    @db.Decimal(6, 2)
   notes      String?
-  isDefault  Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  isDefault  Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
   @@index([customerId])
+  @@index([cutId])
 }
 
 // ───────────────────────────────────────────────────────────
@@ -258,6 +279,14 @@ model Product {
   lowStockThreshold  Int                 @default(5)
   shippingNoteEn     String?
   shippingNoteAr     String?
+  // Silhouette/cut drives the ready-size guide and custom measurement fields.
+  // Nullable so products that predate cuts migrate safely.
+  cutId              String?
+  cut                ProductCut?         @relation(fields: [cutId], references: [id])
+  // Current tailoring fee for one piece. It is the *default* only — the fee is
+  // frozen onto the assignment/order item at assignment time and later edits
+  // here must never change historical dues. No hidden fallback exists.
+  tailorFeeBhd       Decimal?            @db.Decimal(10, 3)
   media              ProductMedia[]
   variants           ProductVariant[]
   categories         ProductCategory[]
@@ -374,6 +403,95 @@ model InventoryMovement {
   @@index([productId])
   @@index([type])
   @@index([createdAt])
+}
+
+// ───────────────────────────────────────────────────────────
+// Size guide & cuts — the database is the source of truth
+// ───────────────────────────────────────────────────────────
+
+enum MeasurementKind {
+  READY
+  CUSTOM
+}
+
+// A product silhouette/cut (e.g. Tailored, Bisht). The cut determines which
+// ready-size chart and which custom measurement fields a product uses.
+model ProductCut {
+  id            String             @id @default(cuid())
+  code          String             @unique // stable machine key, e.g. TAILORED / BISHT
+  nameEn        String
+  nameAr        String
+  descriptionEn String?            @db.Text
+  descriptionAr String?            @db.Text
+  isActive      Boolean            @default(true)
+  sortOrder     Int                @default(0)
+  products      Product[]
+  sizeCharts    SizeChart[]
+  fields        MeasurementField[]
+  measurements  Measurement[]
+  orderItems    OrderItem[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([isActive])
+}
+
+// One ready-size chart per cut. Cell values live in SizeChartValue so a field
+// carries its own metadata (labels, unit, min/max, helper text).
+model SizeChart {
+  id        String           @id @default(cuid())
+  cutId     String
+  cut       ProductCut       @relation(fields: [cutId], references: [id], onDelete: Cascade)
+  unit      String           @default("inch")
+  isActive  Boolean          @default(true)
+  values    SizeChartValue[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([cutId])
+  @@index([cutId])
+}
+
+// Custom measurement field metadata for a cut. The same field also holds the
+// per-ready-size value in SizeChartValue, so "ready size" and "custom" share
+// one definition.
+model MeasurementField {
+  id        String           @id @default(cuid())
+  cutId     String
+  cut       ProductCut       @relation(fields: [cutId], references: [id], onDelete: Cascade)
+  key       String // stable key, e.g. shoulder_width
+  labelEn   String
+  labelAr   String
+  unit      String           @default("inch")
+  minValue  Decimal?         @db.Decimal(6, 2)
+  maxValue  Decimal?         @db.Decimal(6, 2)
+  helperEn  String?          @db.Text
+  helperAr  String?          @db.Text
+  isActive  Boolean          @default(true)
+  sortOrder Int              @default(0)
+  values    SizeChartValue[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([cutId, key])
+  @@index([cutId])
+}
+
+model SizeChartValue {
+  id        String           @id @default(cuid())
+  chartId   String
+  chart     SizeChart        @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  fieldId   String
+  field     MeasurementField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  sizeCode  String // XS / S / M / L / XL
+  value     Decimal          @db.Decimal(6, 2)
+  sortOrder Int              @default(0)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([chartId, fieldId, sizeCode])
+  @@index([chartId])
+  @@index([fieldId])
 }
 
 // ───────────────────────────────────────────────────────────
@@ -544,8 +662,15 @@ model Order {
   createdById        String?
   createdBy          User?            @relation("OrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
   shippingMethodCode String?
+  // The shipping company (carrier) chosen for this order, distinct from the
+  // shipping *method* (price/ETA). Nullable for historical orders.
+  shippingCompanyId  String?
+  shippingCompany    ShippingCompany? @relation(fields: [shippingCompanyId], references: [id], onDelete: SetNull)
   trackingNumber     String?
   carrier            String?
+  // Expected delivery date used to compute the "late" condition. "Late" is
+  // never a workflow state — it is derived from this date plus an open status.
+  expectedDeliveryAt DateTime?
   shippedAt          DateTime?
   deliveredAt        DateTime?
   cancelledAt        DateTime?
@@ -555,6 +680,7 @@ model Order {
   refunds            Refund[]
   events             OrderEvent[]
   productionTasks    ProductionTask[]
+  quickOrderLinks    QuickOrderLink[]
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
@@ -562,6 +688,7 @@ model Order {
   @@index([status])
   @@index([createdAt])
   @@index([channel])
+  @@index([shippingCompanyId])
 }
 
 model OrderItem {
@@ -581,7 +708,32 @@ model OrderItem {
   quantity     Int
   lineTotalBhd Decimal         @db.Decimal(12, 3)
 
+  // ── Measurement snapshot (P0 data integrity) ─────────────
+  // Frozen copy of the measurements used when the piece was ordered. Written
+  // once at order creation and never recomputed, so editing the live size
+  // guide or a customer's saved profile cannot change a past order.
+  measurementKind     MeasurementKind?
+  sizeCode            String? // READY: XS/S/M/L/XL
+  sizeSnapshot        Json? // READY: { unit, values: { fieldKey: value } }
+  measurementSnapshot Json? // CUSTOM: { unit, cutCode, values, fieldLabels, profileId? }
+  cutId               String?
+  cut                 ProductCut?     @relation(fields: [cutId], references: [id], onDelete: SetNull)
+
+  // ── Per-item tailor assignment & frozen fee (P0 financial) ──
+  // Assignment is per piece. The fee is copied from the product's current
+  // tailorFeeBhd at assignment time; later product fee changes never touch it.
+  assignedTailorId String?
+  assignedTailor   Tailor?   @relation("TailorAssignments", fields: [assignedTailorId], references: [id], onDelete: SetNull)
+  assignedAt       DateTime?
+  tailorFeeBhd     Decimal?  @db.Decimal(10, 3)
+
+  productionTasks  ProductionTask[]
+  qcRecords        QcRecord[]
+  settlementItems  TailorSettlementItem[]
+
   @@index([orderId])
+  @@index([assignedTailorId])
+  @@index([cutId])
 }
 
 model Payment {
@@ -602,6 +754,7 @@ model Payment {
   verifiedBy        User?             @relation("PaymentVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
   paidAt            DateTime?
   failedReason      String?
+  refunds           Refund[]
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
@@ -620,6 +773,10 @@ model Refund {
   id          String       @id @default(cuid())
   orderId     String
   order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // The specific payment being refunded. Nullable for legacy rows and for
+  // store-credit refunds that are not tied to one gateway transaction.
+  paymentId   String?
+  payment     Payment?     @relation(fields: [paymentId], references: [id], onDelete: SetNull)
   amountBhd   Decimal      @db.Decimal(12, 3)
   method      String       @default("BANK_TRANSFER")
   status      RefundStatus @default(COMPLETED)
@@ -630,6 +787,7 @@ model Refund {
   createdAt   DateTime     @default(now())
 
   @@index([orderId])
+  @@index([paymentId])
   @@index([createdAt])
 }
 
@@ -822,18 +980,45 @@ model Tailor {
   // Settlement configuration
   settlementType String             @default("per_task") // per_task | monthly | hourly
   rateBhd        Decimal            @default(0) @db.Decimal(10, 3)
+  // Portal login. Kept in a 1:1 side table so credentials are never loaded by
+  // the many admin queries that read a tailor's display fields.
+  credential     TailorCredential?
   tasks          ProductionTask[]
   settlements    TailorSettlement[]
+  assignments    OrderItem[]        @relation("TailorAssignments")
+  qcRecords      QcRecord[]
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
   @@index([status])
 }
 
+// Authentication material for the future Tailor Portal. The password is only
+// ever stored as a bcrypt hash; `mustChangePassword` supports the
+// temporary-password flow and is cleared once the tailor sets their own.
+model TailorCredential {
+  id                  String    @id @default(cuid())
+  tailorId            String    @unique
+  tailor              Tailor    @relation(fields: [tailorId], references: [id], onDelete: Cascade)
+  username            String    @unique
+  passwordHash        String
+  isActive            Boolean   @default(true)
+  mustChangePassword  Boolean   @default(true)
+  credentialsSentAt   DateTime?
+  lastPasswordChangeAt DateTime?
+  lastLoginAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([isActive])
+}
+
 enum TaskStatus {
   PENDING
   ASSIGNED
+  ACCEPTED
   IN_PROGRESS
+  SUBMITTED_FOR_QC
   COMPLETED
   REWORK
   CANCELLED
@@ -852,6 +1037,7 @@ model ProductionTask {
   orderId     String
   order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderItemId String?
+  orderItem   OrderItem?   @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
   productId   String?
   tailorId    String?
   tailor      Tailor?      @relation(fields: [tailorId], references: [id], onDelete: SetNull)
@@ -859,8 +1045,15 @@ model ProductionTask {
   titleAr     String?
   priority    TaskPriority @default(NORMAL)
   status      TaskStatus   @default(PENDING)
+  // Frozen tailoring fee for this piece. Copied from the product/assignment at
+  // creation time; never recalculated. There is no hidden fallback — a task
+  // cannot be created without an explicit fee.
+  feeBhd      Decimal?     @db.Decimal(10, 3)
+  // Tailor acceptance
+  acceptedAt  DateTime?
   dueDate     DateTime?
   startedAt   DateTime?
+  submittedForQcAt DateTime?
   completedAt DateTime?
   notes       String?      @db.Text
   qcRecords   QcRecord[]
@@ -872,6 +1065,7 @@ model ProductionTask {
   @@index([status])
   @@index([tailorId])
   @@index([orderId])
+  @@index([orderItemId])
   @@index([dueDate])
 }
 
@@ -886,6 +1080,13 @@ model QcRecord {
   id             String         @id @default(cuid())
   taskId         String
   task           ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  orderItemId    String?
+  orderItem      OrderItem?     @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  tailorId       String?
+  tailor         Tailor?        @relation(fields: [tailorId], references: [id], onDelete: SetNull)
+  // Attempt number within the item's QC history (1, 2, 3 …). History is never
+  // overwritten: each QC run appends a new row.
+  attempt        Int            @default(1)
   status         QcStatus       @default(PENDING)
   // Checklist
   measurementsOk Boolean        @default(false)
@@ -894,6 +1095,8 @@ model QcRecord {
   finishingOk    Boolean        @default(false)
   accessoriesOk  Boolean        @default(false)
   packagingOk    Boolean        @default(false)
+  // Mandatory when the result is FAILED / REWORK_REQUIRED — enforced in code.
+  rejectionReason String?       @db.Text
   notes          String?        @db.Text
   checkedById    String?
   checkedBy      User?          @relation("QcChecker", fields: [checkedById], references: [id], onDelete: SetNull)
@@ -902,13 +1105,16 @@ model QcRecord {
   updatedAt      DateTime       @updatedAt
 
   @@index([taskId])
+  @@index([orderItemId])
   @@index([status])
 }
 
 enum SettlementStatus {
   PENDING
   APPROVED
+  TRANSFERRED
   PAID
+  CONFIRMED
   CANCELLED
 }
 
@@ -926,15 +1132,38 @@ model TailorSettlement {
   netBhd         Decimal          @default(0) @db.Decimal(12, 3)
   status         SettlementStatus @default(PENDING)
   notes          String?          @db.Text
+  // Transfer proof metadata (URL + free-text reference). Required to enter
+  // TRANSFERRED — enforced in the settlement service, not just the UI.
+  transferProofUrl   String?     @db.Text
+  transferReference  String?
+  transferredAt      DateTime?
+  confirmedByTailorAt DateTime?
   approvedById   String?
   approvedBy     User?            @relation("SettlementApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt     DateTime?
   paidAt         DateTime?
+  items          TailorSettlementItem[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
   @@index([tailorId])
   @@index([status])
+}
+
+// Explicit delivered pieces included in a settlement. The unique constraint on
+// orderItemId is the database-level guarantee that a piece can never be settled
+// twice, regardless of concurrent requests.
+model TailorSettlementItem {
+  id           String   @id @default(cuid())
+  settlementId String
+  settlement   TailorSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  orderItemId  String   @unique
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  // Frozen tailoring fee captured at assignment; copied here for auditability.
+  tailorFeeBhd Decimal  @db.Decimal(10, 3)
+  createdAt    DateTime @default(now())
+
+  @@index([settlementId])
 }
 
 // ───────────────────────────────────────────────────────────
@@ -949,14 +1178,28 @@ enum ExpenseStatus {
   PAID
 }
 
+// Stable machine type. Display names stay editable/localizable, but all logic
+// keys off this enum so renaming a category can never change behaviour.
+enum ExpenseCategoryType {
+  GENERAL
+  DELIVERY
+  MATERIAL
+  TAILOR_DUE
+}
+
 model ExpenseCategory {
-  id       String    @id @default(cuid())
-  nameEn   String
-  nameAr   String
-  isActive Boolean   @default(true)
-  expenses Expense[]
+  id        String              @id @default(cuid())
+  type      ExpenseCategoryType @default(GENERAL)
+  nameEn    String
+  nameAr    String
+  // System categories (e.g. the tailor-dues category) must not be deleted.
+  isSystem  Boolean             @default(false)
+  isActive  Boolean             @default(true)
+  sortOrder Int                 @default(0)
+  expenses  Expense[]
 
   @@index([isActive])
+  @@index([type])
 }
 
 model Expense {
@@ -974,6 +1217,11 @@ model Expense {
   notes             String?          @db.Text
   expenseDate       DateTime         @default(now())
   status            ExpenseStatus    @default(DRAFT)
+  // Optional links so a system expense can point at what it settles without
+  // duplicating a financial deduction.
+  orderId           String?
+  settlementId      String?
+  productId         String?
   submittedById     String?
   submittedBy       User?            @relation("ExpenseSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
   approvedById      String?
@@ -987,6 +1235,8 @@ model Expense {
   @@index([status])
   @@index([expenseDate])
   @@index([categoryId])
+  @@index([orderId])
+  @@index([settlementId])
 }
 
 // ───────────────────────────────────────────────────────────
@@ -1020,4 +1270,127 @@ model StaffNotification {
 
   @@index([userId, readAt])
   @@index([createdAt])
+}
+
+// ───────────────────────────────────────────────────────────
+// Shipping companies (DB-managed carriers)
+// ───────────────────────────────────────────────────────────
+
+model ShippingCompany {
+  id        String   @id @default(cuid())
+  code      String   @unique // ARAMEX / DHL / ZAJIL
+  nameEn    String
+  nameAr    String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+// ───────────────────────────────────────────────────────────
+// Quick Order links — customer-facing link foundation
+// ───────────────────────────────────────────────────────────
+
+enum QuickOrderSource {
+  WHATSAPP
+  INSTAGRAM
+}
+
+// A shareable, non-guessable link that opens a server-resolved product page for
+// a customer. Nothing trusted (price, name, availability) is encoded here — the
+// product is resolved live from the catalogue when the link is opened.
+model QuickOrderLink {
+  id           String           @id @default(cuid())
+  // Internal human-readable id, e.g. QOL-2609-000123.
+  code         String           @unique
+  // Public URL token. High-entropy; unique at the database level.
+  token        String           @unique
+  productId    String
+  source       QuickOrderSource @default(WHATSAPP)
+  createdById  String?
+  createdBy    User?            @relation("QuickOrderLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  customerPhone String?
+  sentAt       DateTime?
+  openedAt     DateTime?
+  orderId      String?
+  order        Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([productId])
+  @@index([orderId])
+  @@index([createdById])
+}
+
+// ───────────────────────────────────────────────────────────
+// Membership tiers (admin-defined)
+// ───────────────────────────────────────────────────────────
+
+model MembershipTier {
+  id             String     @id @default(cuid())
+  code           String     @unique
+  nameEn         String
+  nameAr         String
+  // Minimum count of qualifying paid, non-refunded abayas.
+  minQualifying  Int        @default(0)
+  isActive       Boolean    @default(true)
+  sortOrder      Int        @default(0)
+  customers      Customer[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([isActive])
+}
+
+// ───────────────────────────────────────────────────────────
+// Notification rules (event → recipients)
+// ───────────────────────────────────────────────────────────
+
+enum NotificationTargetType {
+  STAFF
+  TAILOR
+}
+
+// Configurable mapping from a domain event key to recipients. The dispatch
+// foundation consults these rows; nothing is hard-coded in call sites.
+model NotificationRule {
+  id             String               @id @default(cuid())
+  eventKey       String // e.g. order.created, qc.failed
+  nameEn         String
+  nameAr         String
+  targetType     NotificationTargetType @default(STAFF)
+  // Permission required to receive this event (staff targets only).
+  requiredPermission String?
+  priority       TaskPriority         @default(NORMAL)
+  isActive       Boolean              @default(true)
+  sortOrder      Int                  @default(0)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@unique([eventKey, targetType])
+  @@index([isActive])
+}
+
+// ───────────────────────────────────────────────────────────
+// Human-readable sequences
+// ───────────────────────────────────────────────────────────
+
+// Concurrency-safe counters for human-readable identifiers. Allocation uses a
+// guarded increment inside a transaction so two concurrent requests can never
+// receive the same number.
+model SequenceCounter {
+  id        String   @id @default(cuid())
+  key       String   @unique // e.g. order:2026-09, expense, settlement
+  prefix    String
+  scope     String? // e.g. YYYYMM for monthly-reset sequences
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([key])
 }

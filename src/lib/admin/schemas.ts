@@ -105,12 +105,18 @@ export const expenseSchema = z.object({
   notes: optionalText(4000),
   attachmentUrl: optionalText(2000),
   expenseDate: z.string().optional().default(''),
+  // Optional links to what a system expense settles (never a second deduction).
+  orderId: optionalText(40),
+  settlementId: optionalText(40),
+  productId: optionalText(40),
 });
 
 export const expenseCategorySchema = z.object({
+  type: z.enum(['GENERAL', 'DELIVERY', 'MATERIAL', 'TAILOR_DUE']).default('GENERAL'),
   nameEn: z.string().min(1).max(120),
   nameAr: z.string().min(1).max(120),
   isActive: bool(),
+  sortOrder: z.number().int().min(0).max(9999).default(0),
 });
 
 export const redirectSchema = z.object({

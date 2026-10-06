@@ -78,7 +78,7 @@ export type Dict = {
   >;
   account: Record<
     | 'title' | 'overview' | 'orders' | 'wishlist' | 'addresses' | 'measurements' | 'profile' | 'notifications' | 'settings' | 'signIn' | 'signUp' | 'email' | 'password' | 'confirmPassword' | 'firstName' | 'lastName' | 'createAccount' | 'noAccount' | 'haveAccount' | 'signingIn' | 'creating' | 'welcome' | 'signedInAs' | 'noOrders' | 'noOrdersBody' | 'noWishlist' | 'noWishlistBody' | 'noNotifications' | 'noNotificationsBody' | 'noAddresses' | 'noAddressesBody' | 'addAddress' | 'save' | 'cancel' | 'edit' | 'delete' | 'default' | 'setDefault' | 'saved' | 'measurementsBody' | 'saveMeasurements' | 'invalidCredentials' | 'emailTaken' | 'passwordMismatch' | 'passwordTooShort' | 'orderStatus' | 'orderTotal' | 'orderDate' | 'orderItems' | 'tracking' | 'moveToCart' | 'logout'
-    | 'signInBody' | 'signUpBody' | 'emailPlaceholder' | 'passwordPlaceholder' | 'firstNamePlaceholder' | 'lastNamePlaceholder' | 'phonePlaceholder' | 'backToOrders' | 'orderDetails' | 'shippingTo' | 'itemsCount' | 'addressBody' | 'addressLabel' | 'profileBody' | 'preferredLocale' | 'settingsBody' | 'notificationsBody' | 'markAllRead' | 'totalSpent' | 'accountSince' | 'saveProfile' | 'saving' | 'wishlistBody' | 'viewDetails',
+    | 'signInBody' | 'signUpBody' | 'emailPlaceholder' | 'passwordPlaceholder' | 'firstNamePlaceholder' | 'lastNamePlaceholder' | 'phonePlaceholder' | 'backToOrders' | 'orderDetails' | 'shippingTo' | 'itemsCount' | 'addressBody' | 'addressLabel' | 'profileBody' | 'preferredLocale' | 'settingsBody' | 'notificationsBody' | 'markAllRead' | 'totalSpent' | 'accountSince' | 'saveProfile' | 'saving' | 'wishlistBody' | 'viewDetails' | 'changePassword' | 'changePasswordBody' | 'currentPassword' | 'newPassword' | 'updatePassword' | 'passwordChanged' | 'incorrectPassword' | 'passwordSameAsCurrent',
     string
   >;
   order: Record<
@@ -377,6 +377,14 @@ const en: Dict = {
     saving: 'Saving…',
     wishlistBody: 'Save pieces you love to find them again easily.',
     viewDetails: 'View Details',
+    changePassword: 'Password',
+    changePasswordBody: 'Update the password used to sign in to your account.',
+    currentPassword: 'Current password',
+    newPassword: 'New password',
+    updatePassword: 'Update Password',
+    passwordChanged: 'Your password has been updated.',
+    incorrectPassword: 'Your current password is incorrect',
+    passwordSameAsCurrent: 'Choose a password different from your current one',
   },
   order: {
     placed: 'Order Placed',
@@ -793,6 +801,14 @@ const ar: Dict = {
     saving: 'جارٍ الحفظ…',
     wishlistBody: 'احفظي القطع التي تحبينها للعثور عليها لاحقاً.',
     viewDetails: 'عرض التفاصيل',
+    changePassword: 'كلمة المرور',
+    changePasswordBody: 'حدّثي كلمة المرور المستخدمة لتسجيل الدخول إلى حسابك.',
+    currentPassword: 'كلمة المرور الحالية',
+    newPassword: 'كلمة المرور الجديدة',
+    updatePassword: 'تحديث كلمة المرور',
+    passwordChanged: 'تم تحديث كلمة المرور بنجاح.',
+    incorrectPassword: 'كلمة المرور الحالية غير صحيحة',
+    passwordSameAsCurrent: 'اختاري كلمة مرور مختلفة عن الحالية',
   },
   order: {
     placed: 'تم الطلب',

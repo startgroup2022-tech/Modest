@@ -19,20 +19,29 @@ describe('expense workflow', () => {
     expect(canTransition(EXPENSE_TRANSITIONS, 'SUBMITTED', 'PAID')).toBe(false);
   });
 
-  it('treats paid and rejected as terminal', () => {
+  it('keeps paid terminal, but lets a rejected expense be corrected', () => {
     for (const to of Object.keys(EXPENSE_TRANSITIONS)) {
       expect(canTransition(EXPENSE_TRANSITIONS, 'PAID', to)).toBe(false);
-      expect(canTransition(EXPENSE_TRANSITIONS, 'REJECTED', to)).toBe(false);
     }
+    expect(canTransition(EXPENSE_TRANSITIONS, 'REJECTED', 'DRAFT')).toBe(true);
+    expect(canTransition(EXPENSE_TRANSITIONS, 'REJECTED', 'APPROVED')).toBe(false);
+    expect(canTransition(EXPENSE_TRANSITIONS, 'REJECTED', 'PAID')).toBe(false);
   });
 });
 
 describe('production workflow', () => {
-  it('moves a task through the sewing floor', () => {
+  it('moves a task through the sewing floor, including acceptance', () => {
     expect(canTransition(PRODUCTION_TRANSITIONS, 'PENDING', 'ASSIGNED')).toBe(true);
-    expect(canTransition(PRODUCTION_TRANSITIONS, 'ASSIGNED', 'IN_PROGRESS')).toBe(true);
-    expect(canTransition(PRODUCTION_TRANSITIONS, 'IN_PROGRESS', 'COMPLETED')).toBe(true);
+    expect(canTransition(PRODUCTION_TRANSITIONS, 'ASSIGNED', 'ACCEPTED')).toBe(true);
+    expect(canTransition(PRODUCTION_TRANSITIONS, 'ACCEPTED', 'IN_PROGRESS')).toBe(true);
+    expect(canTransition(PRODUCTION_TRANSITIONS, 'IN_PROGRESS', 'SUBMITTED_FOR_QC')).toBe(true);
+    expect(canTransition(PRODUCTION_TRANSITIONS, 'SUBMITTED_FOR_QC', 'COMPLETED')).toBe(true);
     expect(canTransition(PRODUCTION_TRANSITIONS, 'IN_PROGRESS', 'REWORK')).toBe(true);
+  });
+
+  it('does not let a tailor start work before accepting it', () => {
+    expect(canTransition(PRODUCTION_TRANSITIONS, 'ASSIGNED', 'IN_PROGRESS')).toBe(false);
+    expect(canTransition(PRODUCTION_TRANSITIONS, 'ASSIGNED', 'COMPLETED')).toBe(false);
   });
 
   it('only allows rework to reopen a completed task', () => {
@@ -56,17 +65,27 @@ describe('settlement workflow', () => {
     expect(canTransition(SETTLEMENT_TRANSITIONS, 'APPROVED', 'PAID')).toBe(true);
   });
 
+  it('supports transfer proof and tailor confirmation', () => {
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'APPROVED', 'TRANSFERRED')).toBe(true);
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'TRANSFERRED', 'CONFIRMED')).toBe(true);
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'PAID', 'CONFIRMED')).toBe(true);
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'TRANSFERRED', 'PAID')).toBe(true);
+  });
+
   it('cannot pay the same settlement twice', () => {
     expect(canTransition(SETTLEMENT_TRANSITIONS, 'PAID', 'PAID')).toBe(false);
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'CONFIRMED', 'PAID')).toBe(false);
   });
 });
 
 describe('qc gating', () => {
   it('only permits QC on started or finished work', () => {
     expect(QC_ALLOWED_STATES).toContain('IN_PROGRESS');
+    expect(QC_ALLOWED_STATES).toContain('SUBMITTED_FOR_QC');
     expect(QC_ALLOWED_STATES).toContain('REWORK');
     expect(QC_ALLOWED_STATES).toContain('COMPLETED');
     expect(QC_ALLOWED_STATES).not.toContain('PENDING');
+    expect(QC_ALLOWED_STATES).not.toContain('ASSIGNED');
     expect(QC_ALLOWED_STATES).not.toContain('CANCELLED');
   });
 });

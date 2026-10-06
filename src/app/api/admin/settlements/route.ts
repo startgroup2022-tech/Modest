@@ -2,20 +2,20 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
+import { createSettlement, eligibleSettlementItems, SettlementError } from '@/lib/settlements';
 
 export const dynamic = 'force-dynamic';
 
 const schema = z.object({
   tailorId: z.string().min(1),
+  // Preferred: an explicit list of delivered pieces. When omitted, every
+  // eligible (delivered, assigned, unsettled) piece in the period is used.
+  orderItemIds: z.array(z.string().min(1)).optional(),
   periodStart: z.string().optional().default(''),
   periodEnd: z.string().optional().default(''),
   adjustmentsBhd: z.number().default(0),
   notes: z.string().max(4000).optional().default(''),
 });
-
-function nextNumber() {
-  return `STL-${Date.now().toString(36).toUpperCase()}`;
-}
 
 export const POST = adminHandler('settlements.manage', async ({ admin, req }) => {
   const body = await req.json().catch(() => null);
@@ -28,36 +28,38 @@ export const POST = adminHandler('settlements.manage', async ({ admin, req }) =>
   const periodStart = d.periodStart ? new Date(d.periodStart) : null;
   const periodEnd = d.periodEnd ? new Date(d.periodEnd) : null;
 
-  // Completed tasks in the period drive the gross amount from the tailor's rate.
-  const tasks = await prisma.productionTask.findMany({
-    where: {
-      tailorId: d.tailorId,
-      status: 'COMPLETED',
-      completedAt: {
-        ...(periodStart ? { gte: periodStart } : {}),
-        ...(periodEnd ? { lte: periodEnd } : {}),
-      },
-    },
-    select: { id: true },
-  });
+  // Resolve the explicit pieces to settle. A piece is only ever counted once —
+  // the service and a unique index both reject a double settlement.
+  let itemIds = d.orderItemIds ?? [];
+  if (itemIds.length === 0) {
+    const eligible = await eligibleSettlementItems(d.tailorId);
+    itemIds = eligible
+      .filter((i) => {
+        const at = i.assignedAt ?? i.order.deliveredAt;
+        if (!at) return true;
+        const t = new Date(at).getTime();
+        if (periodStart && t < periodStart.getTime()) return false;
+        if (periodEnd && t > periodEnd.getTime()) return false;
+        return true;
+      })
+      .map((i) => i.id);
+  }
 
-  const grossBhd = tasks.length * Number(tailor.rateBhd);
-  const netBhd = grossBhd + d.adjustmentsBhd;
-
-  const settlement = await prisma.tailorSettlement.create({
-    data: {
-      number: nextNumber(),
+  try {
+    const settlement = await createSettlement({
       tailorId: d.tailorId,
+      orderItemIds: itemIds,
       periodStart,
       periodEnd,
-      tasksCount: tasks.length,
-      grossBhd,
       adjustmentsBhd: d.adjustmentsBhd,
-      netBhd,
-      status: 'PENDING',
       notes: d.notes || null,
-    },
-  });
-  await prisma.auditLog.create({ data: { userId: admin.id, action: 'settlement.create', entity: 'TailorSettlement', entityId: settlement.id, metadata: { tailorId: d.tailorId } } });
-  return NextResponse.json({ ok: true, id: settlement.id, number: settlement.number, netBhd });
+      actorId: admin.id,
+    });
+    return NextResponse.json({ ok: true, id: settlement.id, number: settlement.number, netBhd: settlement.netBhd });
+  } catch (err) {
+    if (err instanceof SettlementError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 422 });
+    }
+    throw err;
+  }
 });
