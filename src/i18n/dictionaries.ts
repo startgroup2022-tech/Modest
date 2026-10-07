@@ -77,12 +77,13 @@ export type Dict = {
     string
   >;
   checkout: Record<
-    | 'title' | 'contact' | 'delivery' | 'payment' | 'review' | 'fullName' | 'email' | 'phone' | 'country' | 'city' | 'area' | 'address' | 'building' | 'unit' | 'notes' | 'orderSummary' | 'placeOrder' | 'payNow' | 'back' | 'next' | 'guestCheckout' | 'signInPrompt' | 'paymentMethod' | 'cod' | 'bankTransfer' | 'benefit' | 'tapp' | 'codDesc' | 'bankDesc' | 'benefitDesc' | 'tappDesc' | 'termsAgree' | 'required' | 'invalidEmail' | 'invalidPhone' | 'success' | 'successBody' | 'orderNumber' | 'viewOrder' | 'continueShopping' | 'processing' | 'failed' | 'failedBody' | 'tryAgain' | 'emptyCart',
+    | 'title' | 'contact' | 'delivery' | 'payment' | 'review' | 'fullName' | 'email' | 'phone' | 'country' | 'city' | 'area' | 'address' | 'building' | 'unit' | 'notes' | 'orderSummary' | 'placeOrder' | 'payNow' | 'back' | 'next' | 'guestCheckout' | 'signInPrompt' | 'paymentMethod' | 'cod' | 'bankTransfer' | 'benefit' | 'tapp' | 'codDesc' | 'bankDesc' | 'benefitDesc' | 'tappDesc' | 'termsAgree' | 'required' | 'invalidEmail' | 'invalidPhone' | 'success' | 'successBody' | 'orderNumber' | 'viewOrder' | 'continueShopping' | 'processing' | 'failed' | 'failedBody' | 'tryAgain' | 'emptyCart' | 'invalidShipping',
     string
   >;
   account: Record<
     | 'title' | 'overview' | 'orders' | 'wishlist' | 'addresses' | 'measurements' | 'profile' | 'notifications' | 'settings' | 'signIn' | 'signUp' | 'email' | 'password' | 'confirmPassword' | 'firstName' | 'lastName' | 'createAccount' | 'noAccount' | 'haveAccount' | 'signingIn' | 'creating' | 'welcome' | 'signedInAs' | 'noOrders' | 'noOrdersBody' | 'noWishlist' | 'noWishlistBody' | 'noNotifications' | 'noNotificationsBody' | 'noAddresses' | 'noAddressesBody' | 'addAddress' | 'save' | 'cancel' | 'edit' | 'delete' | 'default' | 'setDefault' | 'saved' | 'measurementsBody' | 'saveMeasurements' | 'invalidCredentials' | 'emailTaken' | 'passwordMismatch' | 'passwordTooShort' | 'orderStatus' | 'orderTotal' | 'orderDate' | 'orderItems' | 'tracking' | 'moveToCart' | 'logout'
-    | 'signInBody' | 'signUpBody' | 'emailPlaceholder' | 'passwordPlaceholder' | 'firstNamePlaceholder' | 'lastNamePlaceholder' | 'phonePlaceholder' | 'backToOrders' | 'orderDetails' | 'shippingTo' | 'itemsCount' | 'addressBody' | 'addressLabel' | 'profileBody' | 'preferredLocale' | 'settingsBody' | 'notificationsBody' | 'markAllRead' | 'totalSpent' | 'accountSince' | 'saveProfile' | 'saving' | 'wishlistBody' | 'viewDetails' | 'changePassword' | 'changePasswordBody' | 'currentPassword' | 'newPassword' | 'updatePassword' | 'passwordChanged' | 'incorrectPassword' | 'passwordSameAsCurrent' | 'measurementName' | 'measurementNamePlaceholder' | 'addMeasurement' | 'noMeasurements' | 'noMeasurementsBody' | 'measurementsSaved' | 'membership' | 'membershipTier' | 'membershipPieces' | 'membershipProgress' | 'memberSince',
+    | 'signInBody' | 'signUpBody' | 'emailPlaceholder' | 'passwordPlaceholder' | 'firstNamePlaceholder' | 'lastNamePlaceholder' | 'phonePlaceholder' | 'backToOrders' | 'orderDetails' | 'shippingTo' | 'itemsCount' | 'addressBody' | 'addressLabel' | 'profileBody' | 'preferredLocale' | 'settingsBody' | 'notificationsBody' | 'markAllRead' | 'totalSpent' | 'accountSince' | 'saveProfile' | 'saving' | 'wishlistBody' | 'viewDetails' | 'changePassword' | 'changePasswordBody' | 'currentPassword' | 'newPassword' | 'updatePassword' | 'passwordChanged' | 'incorrectPassword' | 'passwordSameAsCurrent' | 'measurementName' | 'measurementNamePlaceholder' | 'addMeasurement' | 'noMeasurements' | 'noMeasurementsBody' | 'measurementsSaved' | 'membership' | 'membershipTier' | 'membershipPieces' | 'membershipProgress' | 'memberSince'
+    | 'membershipBody' | 'membershipEmpty' | 'membershipEmptyBody' | 'membershipAtTop' | 'membershipNoTiers' | 'membershipThreshold' | 'membershipYourTier',
     string
   >;
   order: Record<
@@ -310,6 +311,7 @@ const en: Dict = {
     failedBody: 'Your payment was not completed. Your order has been saved and you can try again.',
     tryAgain: 'Try Again',
     emptyCart: 'Your bag is empty',
+    invalidShipping: 'The selected delivery method is not available. Please choose another.',
   },
   account: {
     title: 'My Account',
@@ -407,6 +409,13 @@ const en: Dict = {
     membershipPieces: 'Qualifying pieces',
     membershipProgress: 'Progress to next tier',
     memberSince: 'Member since',
+    membershipBody: 'Your tier is earned as you collect qualifying pieces from paid orders.',
+    membershipEmpty: 'No qualifying pieces yet',
+    membershipEmptyBody: 'Qualifying pieces are counted from settled orders. Once your first order is paid, your progress appears here.',
+    membershipAtTop: 'You have reached the highest tier.',
+    membershipNoTiers: 'Membership tiers are not configured yet.',
+    membershipThreshold: 'pieces',
+    membershipYourTier: 'Your tier',
   },
   order: {
     placed: 'Order Placed',
@@ -764,6 +773,7 @@ const ar: Dict = {
     failedBody: 'لم تكتمل عملية الدفع. تم حفظ طلبك ويمكنك المحاولة مرة أخرى.',
     tryAgain: 'المحاولة مرة أخرى',
     emptyCart: 'حقيبتك فارغة',
+    invalidShipping: 'طريقة التوصيل المختارة غير متاحة. الرجاء اختيار طريقة أخرى.',
   },
   account: {
     title: 'حسابي',
@@ -861,6 +871,13 @@ const ar: Dict = {
     membershipPieces: 'القطع المؤهلة',
     membershipProgress: 'التقدم نحو المستوى التالي',
     memberSince: 'عضوة منذ',
+    membershipBody: 'يرتفع مستواك مع كل قطعة مؤهلة من الطلبات المدفوعة.',
+    membershipEmpty: 'لا توجد قطع مؤهلة بعد',
+    membershipEmptyBody: 'تُحتسب القطع المؤهلة من الطلبات المسددة. بمجرد دفع طلبك الأول سيظهر تقدمك هنا.',
+    membershipAtTop: 'لقد وصلتِ إلى أعلى مستوى.',
+    membershipNoTiers: 'لم يتم إعداد مستويات العضوية بعد.',
+    membershipThreshold: 'قطعة',
+    membershipYourTier: 'مستواك',
   },
   order: {
     placed: 'تم الطلب',

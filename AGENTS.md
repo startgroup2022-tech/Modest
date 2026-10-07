@@ -185,6 +185,25 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
 - Measurement profiles are multi-row per customer: `measurementSchema` accepts
   `id` (edit) and `create: true` (explicit add). Without `create`, a POST with no
   id updates the default profile in place.
+- A settlement callback is only trusted for money the order actually carries: the
+  TAPP webhook requires the gateway-reported currency to be present and equal to
+  the payment's presentment currency, and the reported amount to match the
+  captured presentment amount. A signed callback is proof of sender, not of the
+  monetary unit, so a missing/mismatched currency or amount is rejected outright.
+- Provider callbacks are de-duplicated durably: the SHA-256 of the raw signed body
+  is stored in `PaymentWebhookEvent.eventKey` (unique) inside the same transaction
+  as the state change. Replaying the exact same body is a no-op (the route returns
+  `{ duplicate: true }` and appends no order event), while a genuinely distinct
+  transition hashes differently and still applies. Only a P2002 on that insert is
+  treated as a duplicate — any other error propagates.
+- If provider initialisation fails at checkout the order is **cancelled** and its
+  reserved stock released (transactionally), not left `PENDING`: an order that
+  never reached a live payment session must not sit in the queue as "awaiting
+  payment". `resendPaymentLink` refuses to mint a new link for a
+  cancelled/refunded order.
+- A checkout shipping method is selected server-side by DB code. An unknown or
+  inactive code is rejected (`INVALID_SHIPPING`), never silently downgraded to a
+  cheaper fallback; the fallback applies only when no methods exist.
 
 ## Deployment
 - cPanel target: see `DEPLOYMENT.md`. Entry point is `server.js` (Passenger).

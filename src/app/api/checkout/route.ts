@@ -96,16 +96,26 @@ export async function POST(req: NextRequest) {
     coupon = evaluation.coupon;
   }
 
-  // Shipping is chosen server-side from the DB by code; the price is never client-supplied.
+  // Shipping is chosen server-side from the DB by code; the price is never
+  // client-supplied, and a code that is not an active method is rejected rather
+  // than silently downgraded to a possibly-cheaper fallback.
   let shippingBhd = 0;
-  if (parsed.data.shippingMethodCode) {
-    const method = await prisma.shippingMethod.findFirst({
-      where: { code: parsed.data.shippingMethodCode, isActive: true },
-    });
-    if (method) shippingBhd = Number(method.priceBhd);
-  } else {
-    const fallback = await prisma.shippingMethod.findFirst({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } });
-    shippingBhd = fallback ? Number(fallback.priceBhd) : 0;
+  const requestedShipping = parsed.data.shippingMethodCode?.trim();
+  const shippingMethods = await prisma.shippingMethod.findMany({
+    where: { isActive: true },
+    orderBy: { sortOrder: 'asc' },
+  });
+  if (requestedShipping) {
+    const method = shippingMethods.find((m) => m.code === requestedShipping);
+    if (!method) {
+      return NextResponse.json(
+        { error: 'The selected delivery method is not available', code: 'INVALID_SHIPPING', field: 'shippingMethodCode' },
+        { status: 400 },
+      );
+    }
+    shippingBhd = Number(method.priceBhd);
+  } else if (shippingMethods.length) {
+    shippingBhd = Number(shippingMethods[0].priceBhd);
   }
 
   try {

@@ -186,6 +186,19 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  await prisma.address.deleteMany({ where: { id, customerId: user.customerId } });
+  // Scoped by customerId, so another customer's address can never be deleted.
+  // Return 404 when nothing matched, so a stale/foreign id is not reported as a
+  // successful deletion.
+  const deleted = await prisma.address.deleteMany({ where: { id, customerId: user.customerId } });
+  if (deleted.count === 0) return NextResponse.json({ error: 'notFound' }, { status: 404 });
+  // If the default address was removed, promote the most recent remaining one.
+  const stillDefault = await prisma.address.findFirst({ where: { customerId: user.customerId, isDefault: true } });
+  if (!stillDefault) {
+    const next = await prisma.address.findFirst({
+      where: { customerId: user.customerId },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (next) await prisma.address.update({ where: { id: next.id }, data: { isDefault: true } });
+  }
   return NextResponse.json({ ok: true });
 }

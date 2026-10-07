@@ -30,14 +30,38 @@ export interface PaymentInitResult {
   redirectUrl?: string;
   instructions?: { en: string; ar: string };
   signatureVerified?: boolean;
+  /** Provider-supplied reason when initialisation fails, for internal logging. */
+  failureReason?: string;
 }
 
 export interface WebhookResult {
   orderId?: string;
   providerRef?: string;
   status: 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
+  /**
+   * Amount reported by the gateway for the transaction, in the presentment
+   * currency the session was opened in (not necessarily BHD). The caller
+   * compares this against the stored payment's presentment amount.
+   */
   amountBhd?: number;
+  /** ISO-4217 currency the gateway reports for the transaction, normalised. */
+  currency?: string;
   signatureVerified: boolean;
+}
+
+/**
+ * Normalises a provider-supplied currency to a canonical, upper-case ISO code.
+ * Returns null when the provider did not supply a usable value, so callers can
+ * decide whether currency is required for the given transition rather than
+ * silently assuming one.
+ */
+export function normalizeCurrencyCode(code: unknown): string | null {
+  if (typeof code !== 'string') return null;
+  const trimmed = code.trim().toUpperCase();
+  if (!trimmed) return null;
+  // Guard against a provider sending a symbol or free text instead of a code.
+  if (!/^[A-Z]{3}$/.test(trimmed)) return null;
+  return trimmed;
 }
 
 export interface TappTestResult {
@@ -227,7 +251,9 @@ class TappProvider implements PaymentProvider {
   async init(input: PaymentIntentInput): Promise<PaymentInitResult> {
     const c = await this.config();
     if (!(c.merchantId && c.apiKey)) {
-      return { status: 'FAILED', provider: 'tapp' };
+      // Not configured — distinct from a gateway outage, so the order carries an
+      // honest reason instead of a generic "initialisation failed".
+      return { status: 'FAILED', provider: 'tapp', failureReason: 'TAPP is not configured (missing merchant id or API key)' };
     }
     try {
       const res = await fetch(`${c.baseUrl}/v1/payment/session`, {
@@ -247,13 +273,13 @@ class TappProvider implements PaymentProvider {
         }),
         cache: 'no-store',
       });
-      if (!res.ok) return { status: 'FAILED', provider: 'tapp' };
+      if (!res.ok) return { status: 'FAILED', provider: 'tapp', failureReason: `TAPP session request failed (HTTP ${res.status})` };
       const data = (await res.json()) as { id?: string; url?: string };
-      if (!data.url) return { status: 'FAILED', provider: 'tapp' };
+      if (!data.url) return { status: 'FAILED', provider: 'tapp', failureReason: 'TAPP returned no redirect URL' };
       return { status: 'INITIATED', provider: 'tapp', providerRef: data.id, redirectUrl: data.url };
     } catch (err) {
       console.error('[tapp] init failed', err);
-      return { status: 'FAILED', provider: 'tapp' };
+      return { status: 'FAILED', provider: 'tapp', failureReason: 'TAPP gateway unreachable' };
     }
   }
 
@@ -288,6 +314,11 @@ class TappProvider implements PaymentProvider {
       orderId: typeof payload.reference === 'string' ? payload.reference : undefined,
       providerRef: typeof payload.id === 'string' ? payload.id : undefined,
       amountBhd: typeof payload.amount === 'number' ? payload.amount : undefined,
+      // TAPP returns the transaction currency alongside the amount. Without it a
+      // signed callback carries no monetary unit, so we surface whatever the
+      // gateway sent (normalised) and let the route decide. A missing currency
+      // on a settlement callback is rejected there, never assumed to be BHD.
+      currency: normalizeCurrencyCode(payload.currency) ?? undefined,
       status,
       signatureVerified: true,
     };

@@ -12,6 +12,15 @@ import { STOREFRONT_PRODUCT_STATUSES } from './catalog';
 import type { CheckoutInput } from './validation';
 import type { OrderStatus, Prisma, PaymentStatus } from '@prisma/client';
 
+/** True when an error is Prisma's unique-constraint violation (P2002). */
+function isUniqueConstraintError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: string }).code === 'P2002'
+  );
+}
+
 export interface ResolvedLine {
   productId: string;
   variantId: string | null;
@@ -359,8 +368,11 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
     return created;
   });
 
-  // Initialise the payment outside the order transaction. A provider failure
-  // never deletes the order — it is left PENDING so the customer can retry.
+  // Initialise the payment outside the order transaction, so a slow or failing
+  // provider never holds the order lock. A provider failure does not delete the
+  // order, but it does cancel it (releasing reserved stock) rather than leaving
+  // it PENDING — an order that never reached a live payment session must not sit
+  // in the queue as "awaiting payment".
   const provider = getPaymentProvider(checkout.paymentMethod);
   let init: PaymentInitResult;
   try {
@@ -374,8 +386,42 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
       returnUrl: `${input.baseUrl}/${input.locale}/checkout/success`,
       cancelUrl: `${input.baseUrl}/${input.locale}/checkout`,
     });
-  } catch {
-    init = { status: 'FAILED', provider: provider.key };
+  } catch (err) {
+    // Never surface provider internals to the client; keep the reason in logs.
+    console.error('[checkout] payment initialisation failed', err);
+    init = { status: 'FAILED', provider: provider.key, failureReason: 'Provider initialisation failed' };
+  }
+
+  if (init.status === 'FAILED') {
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.create({
+        data: {
+          orderId: order.id,
+          method: checkout.paymentMethod,
+          provider: init.provider,
+          status: 'FAILED',
+          amountBhd: totals.totalBhd,
+          currencyCode: input.currency.code,
+          amountPresentment: presentmentTotal,
+          failedReason: init.failureReason ?? 'Provider initialisation failed',
+        },
+      });
+      // Release the reserved stock and mark the order cancelled, transactionally.
+      await releaseOrderStock(order.id, null, tx);
+      await tx.order.update({ where: { id: order.id }, data: { status: 'CANCELLED', cancelReason: 'Payment initialisation failed' } });
+      await tx.orderEvent.create({
+        data: {
+          orderId: order.id,
+          status: 'CANCELLED',
+          messageEn: 'Payment could not be started',
+          messageAr: 'تعذّر بدء عملية الدفع',
+        },
+      });
+    });
+    throw new CheckoutError(
+      'We could not start the payment for this order. No charge was made; your bag is still saved.',
+      'PAYMENT_FAILED',
+    );
   }
 
   const payment = await prisma.payment.create({
@@ -383,7 +429,7 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
       orderId: order.id,
       method: checkout.paymentMethod,
       provider: init.provider,
-      status: init.status === 'PAID' ? 'PAID' : init.status === 'FAILED' ? 'FAILED' : 'PENDING',
+      status: init.status === 'PAID' ? 'PAID' : 'PENDING',
       amountBhd: totals.totalBhd,
       currencyCode: input.currency.code,
       amountPresentment: presentmentTotal,
@@ -393,7 +439,6 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
       // link while the payment is unsettled).
       paymentUrl: init.redirectUrl ?? null,
       paidAt: init.status === 'PAID' ? new Date() : null,
-      failedReason: init.status === 'FAILED' ? 'Provider initialisation failed' : null,
     },
   });
 
@@ -481,6 +526,12 @@ export async function applyPaymentResult(params: {
   providerRef?: string;
   status: 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
   signatureVerified: boolean;
+  /**
+   * Durable identity of the signature-verified provider callback. When present
+   * it is recorded inside the same transaction as the state change, so a
+   * replayed body can never append a second business event.
+   */
+  webhookEventKey?: string;
   rawPayload?: unknown;
 }) {
   const { orderId, status, signatureVerified } = params;
@@ -495,6 +546,29 @@ export async function applyPaymentResult(params: {
       include: { order: { select: { customerId: true, orderNumber: true, status: true } } },
     });
     if (!payment) throw new CheckoutError('Payment not found', 'PAYMENT_FAILED');
+
+    // Record the callback identity first (atomic with the write below). A
+    // duplicate key here means the exact same callback is being applied twice,
+    // so we must not append another event — return the current state untouched.
+    // Only a unique-constraint violation is a duplicate; any other error is a
+    // real failure and must propagate rather than be swallowed as a replay.
+    if (params.webhookEventKey) {
+      try {
+        await tx.paymentWebhookEvent.create({
+          data: {
+            provider: payment.provider,
+            eventKey: params.webhookEventKey,
+            orderId,
+            status,
+          },
+        });
+      } catch (err) {
+        if (isUniqueConstraintError(err)) {
+          return { payment, justPaid: false, deduplicated: true };
+        }
+        throw err;
+      }
+    }
 
     if (status === 'PAID' && payment.status === 'PAID') {
       return { payment, justPaid: false }; // idempotent — already applied

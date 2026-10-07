@@ -4,7 +4,8 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { POST as tappWebhook } from '@/app/api/webhooks/tapp/route';
 import { createOrder, applyPaymentResult, resolveCartLines } from '@/lib/orders';
-import { transitionOrder, createRefund } from '@/lib/admin/orders';
+import { getCustomerMembership } from '@/lib/membership-db';
+import { transitionOrder, createRefund, resendPaymentLink } from '@/lib/admin/orders';
 import { assignTailorToItem } from '@/lib/assignments';
 import { assertOrderSettledForProduction, isOrderSettled } from '@/lib/production-gate';
 import { toCustomerTimeline } from '@/lib/order-status';
@@ -26,6 +27,7 @@ const createdOrderIds: string[] = [];
 const createdCouponIds: string[] = [];
 const createdProductIds: string[] = [];
 const createdTailorIds: string[] = [];
+const createdTierIds: string[] = [];
 let variantId: string;
 let admin: AdminUser;
 let priorTappValue: unknown = null;
@@ -89,6 +91,7 @@ async function makeOrder(opts: { totalBhd: number; paymentStatus: 'PAID' | 'PEND
       shippingCity: 'Manama',
       shippingAddress: '1 Audit Road',
       status: opts.status ?? 'CONFIRMED',
+      locale: 'en',
       subtotalBhd: opts.totalBhd,
       totalBhd: opts.totalBhd,
       items: {
@@ -170,6 +173,7 @@ maybe('phase 4 audit regressions (database)', () => {
     await prisma.coupon.deleteMany({ where: { id: { in: createdCouponIds } } });
     await prisma.product.deleteMany({ where: { id: { in: createdProductIds } } });
     await prisma.tailor.deleteMany({ where: { id: { in: createdTailorIds } } });
+    await prisma.membershipTier.deleteMany({ where: { id: { in: createdTierIds } } });
     await prisma.user.deleteMany({ where: { id: admin.id } });
     if (priorTappValue === null) {
       await prisma.siteSetting.deleteMany({ where: { key: 'tapp_config' } });
@@ -216,6 +220,66 @@ maybe('phase 4 audit regressions (database)', () => {
     expect(order?.locale).toBe('ar');
     expect(order?.redemptions).toHaveLength(1);
     expect(order?.redemptions[0].couponId).toBe(coupon.id);
+  });
+
+  it('cancels the order and releases reserved stock when payment initialisation fails', async () => {
+    // Force TAPP into the unconfigured state so init fails without a network
+    // call, then restore the webhook secret the other tests rely on.
+    await prisma.siteSetting.update({
+      where: { key: 'tapp_config' },
+      data: {
+        value: { environment: 'sandbox', baseUrl: 'https://api.tapp.test', merchantId: '', apiKey: '', webhookSecret: WEBHOOK_SECRET } as never,
+      },
+    });
+    try {
+      const lines = await resolveCartLines([{ productId: createdProductIds[0], variantId, quantity: 1 }], {
+        requireMeasurements: false,
+      });
+      const stockBefore = await prisma.productVariant.findUniqueOrThrow({ where: { id: variantId } });
+      const key = `it4a-initfail-${suffix}`;
+
+      await expect(
+        createOrder({
+          checkout: checkout({ paymentMethod: 'TAPP' }),
+          lines,
+          customerId: null,
+          locale: 'en',
+          currency: { code: 'BHD', rateToBhd: 1, decimals: 3 },
+          shippingBhd: 0,
+          coupon: null,
+          idempotencyKey: key,
+          baseUrl: 'https://example.test',
+          guestEmailHash: null,
+        }),
+      ).rejects.toThrow(/could not start the payment/);
+
+      const created = await prisma.order.findUnique({
+        where: { idempotencyKey: key },
+        include: { payments: true },
+      });
+      expect(created).not.toBeNull();
+      createdOrderIds.push(created!.id);
+      // A payment that never reached a live session must not sit as "awaiting payment".
+      expect(created!.status).toBe('CANCELLED');
+      expect(created!.payments[0].status).toBe('FAILED');
+
+      const stockAfter = await prisma.productVariant.findUniqueOrThrow({ where: { id: variantId } });
+      expect(stockAfter.stock).toBe(stockBefore.stock);
+    } finally {
+      await prisma.siteSetting.update({
+        where: { key: 'tapp_config' },
+        data: {
+          value: { environment: 'sandbox', baseUrl: 'https://api.tapp.test', merchantId: 'it4a', apiKey: 'it4a-key', webhookSecret: WEBHOOK_SECRET } as never,
+        },
+      });
+    }
+  });
+
+  it('refuses to mint a new payment link for a cancelled order', async () => {
+    const order = await makeOrder({ totalBhd: 40, paymentStatus: 'PENDING', status: 'CONFIRMED' });
+    await prisma.order.update({ where: { id: order.id }, data: { status: 'CANCELLED' } });
+    const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    await expect(resendPaymentLink(admin, payment.id, 'https://example.test')).rejects.toThrow(/no longer active/);
   });
 
   it('refuses to begin production for an unpaid order', async () => {
@@ -303,18 +367,67 @@ maybe('phase 4 audit regressions (database)', () => {
     expect(JSON.stringify(timeline)).not.toContain('fraud');
   });
 
+  it('returns the membership tiers and progress backing the account membership page', async () => {
+    const tier = await prisma.membershipTier.create({
+      data: { code: `IT4A-MEM-${suffix}`, nameEn: 'IT Member', nameAr: 'عضوة', minQualifying: 1, sortOrder: 1 },
+    });
+    createdTierIds.push(tier.id);
+
+    const memberUser = await prisma.user.create({
+      data: {
+        email: `it4a-member-${suffix}@example.com`,
+        passwordHash: 'x',
+        firstName: 'Member',
+        lastName: 'Audit',
+        customer: { create: {} },
+      },
+      include: { customer: true },
+    });
+    const member = memberUser.customer!;
+
+    const order = await prisma.order.create({
+      data: {
+        orderNumber: `IT4A-M-${suffix}`,
+        customerId: member.id,
+        email: `audit-${suffix}@example.com`,
+        phone: '+97330000000',
+        shippingName: 'Audit Buyer',
+        shippingCountry: 'Bahrain',
+        shippingCity: 'Manama',
+        shippingAddress: '1 Audit Road',
+        status: 'CONFIRMED',
+        subtotalBhd: 100,
+        totalBhd: 100,
+        items: { create: [{ productName: 'Audit Abaya', unitPriceBhd: 100, quantity: 2, lineTotalBhd: 200 }] },
+        payments: { create: { method: 'BANK_TRANSFER', provider: 'bank_transfer', status: 'PAID', amountBhd: 100, currencyCode: 'BHD', amountPresentment: 100 } },
+      },
+    });
+    createdOrderIds.push(order.id);
+
+    const membership = await getCustomerMembership(member.id);
+    // Other suites may leave their own tiers in the shared test DB, so assert
+    // the derivation rather than which specific tier wins: our tier is offered,
+    // the two paid pieces are counted, and the resolved tier is one that this
+    // count actually qualifies for.
+    expect(membership.tiers.some((t) => t.id === tier.id)).toBe(true);
+    expect(membership.qualifyingCount).toBe(2);
+    expect(membership.tier).not.toBeNull();
+    expect(membership.tier!.minQualifying).toBeLessThanOrEqual(2);
+    await prisma.user.deleteMany({ where: { id: memberUser.id } });
+  });
+
   it('rejects a TAPP webhook with a bad signature and never marks the order paid', async () => {
     const order = await makeOrder({ totalBhd: 60, paymentStatus: 'PENDING' });
-    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-1', status: 'paid', amount: 60 });
+    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-1', status: 'paid', amount: 60, currency: 'BHD' });
     const res = await tappWebhook(webhookRequest(body, 'deadbeef'));
     expect(res.status).toBeGreaterThanOrEqual(400);
     const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
     expect(payment.status).not.toBe('PAID');
   });
 
-  it('applies a correctly signed TAPP webhook for the captured amount', async () => {
+  it('applies a correctly signed TAPP webhook for the captured amount and currency', async () => {
     const order = await makeOrder({ totalBhd: 60, paymentStatus: 'PENDING' });
-    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-2', status: 'paid', amount: 60 });
+    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-2', status: 'paid', amount: 60, currency: 'BHD' });
     const res = await tappWebhook(webhookRequest(body, sign(body)));
     expect(res.status).toBe(200);
     const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
@@ -323,10 +436,66 @@ maybe('phase 4 audit regressions (database)', () => {
 
   it('does not settle an order when the signed webhook amount mismatches', async () => {
     const order = await makeOrder({ totalBhd: 60, paymentStatus: 'PENDING' });
-    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-3', status: 'paid', amount: 10 });
+    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-3', status: 'paid', amount: 10, currency: 'BHD' });
     const res = await tappWebhook(webhookRequest(body, sign(body)));
     expect(res.status).toBe(400);
     const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
     expect(payment.status).not.toBe('PAID');
+  });
+
+  it('rejects a signed webhook whose currency does not match the transaction', async () => {
+    const order = await makeOrder({ totalBhd: 60, paymentStatus: 'PENDING' });
+    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-4', status: 'paid', amount: 60, currency: 'USD' });
+    const res = await tappWebhook(webhookRequest(body, sign(body)));
+    expect(res.status).toBe(400);
+    const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(payment.status).not.toBe('PAID');
+  });
+
+  it('rejects a signed settlement callback that omits the currency', async () => {
+    const order = await makeOrder({ totalBhd: 60, paymentStatus: 'PENDING' });
+    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-5', status: 'paid', amount: 60 });
+    const res = await tappWebhook(webhookRequest(body, sign(body)));
+    expect(res.status).toBe(400);
+    const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(payment.status).not.toBe('PAID');
+  });
+
+  it('ignores a replayed signed callback without appending a duplicate event', async () => {
+    const order = await makeOrder({ totalBhd: 60, paymentStatus: 'PENDING' });
+    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-6', status: 'paid', amount: 60, currency: 'BHD' });
+    const first = await tappWebhook(webhookRequest(body, sign(body)));
+    expect(first.status).toBe(200);
+    const eventsAfterFirst = await prisma.orderEvent.count({ where: { orderId: order.id } });
+
+    const second = await tappWebhook(webhookRequest(body, sign(body)));
+    expect(second.status).toBe(200);
+    const payload = (await second.json()) as { duplicate?: boolean };
+    expect(payload.duplicate).toBe(true);
+    const eventsAfterSecond = await prisma.orderEvent.count({ where: { orderId: order.id } });
+    expect(eventsAfterSecond).toBe(eventsAfterFirst);
+  });
+
+  it('does not append duplicate events when a non-PAID callback is replayed', async () => {
+    const order = await makeOrder({ totalBhd: 60, paymentStatus: 'PENDING' });
+    const body = JSON.stringify({ reference: order.orderNumber, id: 'tapp-7', status: 'failed', currency: 'BHD' });
+    const first = await tappWebhook(webhookRequest(body, sign(body)));
+    expect(first.status).toBe(200);
+    const eventsAfterFirst = await prisma.orderEvent.count({ where: { orderId: order.id } });
+
+    const second = await tappWebhook(webhookRequest(body, sign(body)));
+    expect(second.status).toBe(200);
+    const eventsAfterSecond = await prisma.orderEvent.count({ where: { orderId: order.id } });
+    expect(eventsAfterSecond).toBe(eventsAfterFirst);
+  });
+
+  it('does not let a settled payment be downgraded by a later signed failure callback', async () => {
+    const order = await makeOrder({ totalBhd: 60, paymentStatus: 'PENDING' });
+    const paid = JSON.stringify({ reference: order.orderNumber, id: 'tapp-8', status: 'paid', amount: 60, currency: 'BHD' });
+    await tappWebhook(webhookRequest(paid, sign(paid)));
+    const failed = JSON.stringify({ reference: order.orderNumber, id: 'tapp-8', status: 'failed', currency: 'BHD' });
+    await tappWebhook(webhookRequest(failed, sign(failed)));
+    const payment = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(payment.status).toBe('PAID');
   });
 });

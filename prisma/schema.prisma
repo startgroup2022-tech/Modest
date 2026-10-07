@@ -880,6 +880,22 @@ model OrderEvent {
   @@index([orderId])
 }
 
+// Durable identity for provider callbacks. `eventKey` is a hash of the raw,
+// signature-verified body: replaying the exact same callback collides on the
+// unique key and is ignored, while a genuinely distinct transition hashes
+// differently and is still applied. This is what keeps a repeated non-PAID
+// callback from appending duplicate order events.
+model PaymentWebhookEvent {
+  id         String   @id @default(cuid())
+  provider   String
+  eventKey   String   @unique
+  orderId    String?
+  status     String
+  receivedAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
 // ───────────────────────────────────────────────────────────
 // Wishlist & notifications
 // ───────────────────────────────────────────────────────────

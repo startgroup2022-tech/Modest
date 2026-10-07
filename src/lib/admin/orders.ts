@@ -364,6 +364,7 @@ export async function resendPaymentLink(admin: AdminUser, paymentId: string, bas
           id: true,
           orderNumber: true,
           customerId: true,
+          status: true,
           totalBhd: true,
           presentmentCode: true,
           presentmentTotal: true,
@@ -379,6 +380,12 @@ export async function resendPaymentLink(admin: AdminUser, paymentId: string, bas
   if (!payment) throw new AdminActionError('Payment not found', 'NOT_FOUND', 404);
   if (payment.status === 'PAID' || payment.status === 'PARTIALLY_REFUNDED' || payment.status === 'REFUNDED') {
     throw new AdminActionError('This payment is already settled', 'ALREADY_PAID', 409);
+  }
+  // A cancelled or refunded order must not be revived by minting a new payment
+  // link — settle the order state first (or collect payment out of band). This
+  // is what an order that failed payment initialisation now looks like.
+  if (payment.order.status === 'CANCELLED' || payment.order.status === 'REFUNDED') {
+    throw new AdminActionError('This order is no longer active', 'ORDER_INACTIVE', 409);
   }
 
   const provider = getPaymentProvider(payment.method);

@@ -31,7 +31,7 @@ export default async function AccountOverviewPage({ params }: { params: Promise<
   return (
     <div className="space-y-12">
       {tierName ? (
-        <section className="border border-line p-6">
+        <Link href={`/${locale}/account/membership`} className="block border border-line p-6 transition-colors hover:border-ink">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
             <div>
               <p className="eyebrow mb-2">{dict.account.membership}</p>
@@ -59,7 +59,7 @@ export default async function AccountOverviewPage({ params }: { params: Promise<
               ) : null}
             </div>
           ) : null}
-        </section>
+        </Link>
       ) : null}
 
       <section className="grid gap-4 sm:grid-cols-3">

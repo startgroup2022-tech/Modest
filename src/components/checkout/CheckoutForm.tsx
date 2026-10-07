@@ -272,6 +272,11 @@ export function CheckoutForm({
               <legend className="mb-3 text-caption uppercase tracking-[0.12em] text-ink-muted">
                 {dict.cart.deliveryMethod}
               </legend>
+              {fieldError === 'shippingMethodCode' ? (
+                <p className="mb-3 text-small text-danger" role="alert">
+                  {dict.checkout.invalidShipping}
+                </p>
+              ) : null}
               <div className="space-y-2">
                 {shipping.map((s) => (
                   <label
