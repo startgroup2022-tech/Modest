@@ -155,8 +155,26 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   The notifications page prefixes the active locale so Arabic customers are not
   sent to English routes. Never store a locale-prefixed href.
 - `transitionOrder` refuses to enter `IN_PRODUCTION` unless a payment is settled
-  (`PAID`/`PARTIALLY_REFUNDED`/`REFUNDED`) — the gate lives in the domain layer,
-  not the UI.
+  (`PAID`/`PARTIALLY_REFUNDED`/`REFUNDED`) — the gate lives in the domain layer
+  (`src/lib/production-gate.ts`), not the UI. The same gate covers tailor
+  assignment and both `/api/admin/production` routes, so a direct API call cannot
+  start manufacturing before money is captured.
+- `applyPaymentResult` only applies `PENDING → CONFIRMED`. A late or duplicate
+  `PAID` callback for an order that already advanced (or was cancelled/refunded)
+  must not drag it backwards; it records the payment, not the status.
+- A refund's ceiling is the amount actually captured — `min(captured, total)`
+  minus prior completed refunds — never the order total, so a discount cannot be
+  refunded as cash. A full refund reverts coupon redemptions and decrements each
+  coupon's `usedCount` by the redemptions actually reverted.
+- The customer order timeline is projected through `toCustomerTimeline`, which
+  allowlists customer-safe statuses and substitutes canonical messages. Internal
+  event notes (e.g. staff/QC notes) must never reach the storefront.
+- Historical order money renders through `OrderPrice` using the order's frozen
+  `presentmentCode`/`presentmentRate`; the storefront's live currency selection
+  and today's exchange rate must never change a past order. `Price` is for
+  live catalogue amounts only.
+- `AUTH_SECRET` is required and fails closed (`src/lib/secrets.ts`); there is no
+  fallback salt for `hashGuestEmail` or session signing.
 - Membership tiers are **seeded** (`SIGNATURE`/`GOLD`/`PLATINUM`) and their
   thresholds live only in `MembershipTier`; the qualifying count is always
   derived from settled, non-refunded order pieces (`src/lib/membership-db.ts`).
