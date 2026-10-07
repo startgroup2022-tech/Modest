@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
     // so the enabled flag and any order-value limits cannot be bypassed by a
     // client that simply posts a different method.
     const previewTotals = computeTotals(
-      lines.map((l) => ({ unitPriceBhd: l.unitPriceBhd, quantity: l.quantity })),
+      lines.map((l) => ({ unitPriceBhd: l.unitPriceBhd, quantity: l.quantity, lineTotalBhd: l.lineTotalBhd })),
       coupon,
       shippingBhd,
     );

@@ -28,10 +28,18 @@ export function presentmentToBhd(amount: number, rateToBhd: number): number {
 export interface CartLine {
   unitPriceBhd: number;
   quantity: number;
+  /**
+   * Explicit line total. Set when the physical pieces of one line carry
+   * different variant prices, so the subtotal is the sum of the actual piece
+   * prices rather than one representative price multiplied by the quantity.
+   * Omitted by every single-price caller, where `unitPriceBhd * quantity`
+   * remains the total.
+   */
+  lineTotalBhd?: number;
 }
 
 export function computeSubtotalBhd(lines: CartLine[]): number {
-  return roundBhd(lines.reduce((sum, l) => sum + l.unitPriceBhd * l.quantity, 0));
+  return roundBhd(lines.reduce((sum, l) => sum + (l.lineTotalBhd ?? l.unitPriceBhd * l.quantity), 0));
 }
 
 export interface CouponLike {

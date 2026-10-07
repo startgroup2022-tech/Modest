@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface ProductOption {
@@ -8,7 +8,7 @@ interface ProductOption {
   name: string;
   sku: string | null;
   priceBhd: number;
-  variants: { id: string; label: string; stock: number; stockStatus: string }[];
+  variants: { id: string; label: string; priceBhd: number | null; stock: number; stockStatus: string }[];
 }
 
 interface Line {
@@ -63,6 +63,11 @@ export function QuickOrderForm({
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // One key per form session: a double submit replays the first order instead
+  // of creating a duplicate. It is regenerated only after a successful create.
+  const idempotencyKey = useRef<string>(
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+  );
 
   const filteredCustomers = useMemo(() => {
     const s = customerQuery.trim().toLowerCase();
@@ -80,6 +85,9 @@ export function QuickOrderForm({
 
   function addLine(product: ProductOption, variantId: string | null) {
     const variant = product.variants.find((v) => v.id === variantId) ?? null;
+    // A variant may override the product price; quote the price the server will
+    // actually charge rather than the base price.
+    const priceBhd = variant?.priceBhd ?? product.priceBhd;
     setLines((prev) => {
       const existing = prev.find((l) => l.productId === product.id && l.variantId === variantId);
       if (existing) {
@@ -93,7 +101,7 @@ export function QuickOrderForm({
           variantId,
           name: product.name,
           variantLabel: variant?.label ?? null,
-          priceBhd: product.priceBhd,
+          priceBhd,
           quantity: 1,
         },
       ];
@@ -129,6 +137,7 @@ export function QuickOrderForm({
           paymentMethod: method,
           manualDiscountBhd: discountValue || 0,
           notes: notes || undefined,
+          idempotencyKey: idempotencyKey.current,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; id?: string; error?: string };

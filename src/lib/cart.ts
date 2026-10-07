@@ -17,6 +17,8 @@ export interface CartPieceView {
   pieceIndex: number;
   kind: 'READY' | 'CUSTOM' | null;
   sizeCode: string | null;
+  /** Variant price for a READY piece; null when the product base price applies. */
+  unitPriceBhd: number | null;
   /** Localisable rows rendered under the line in cart/checkout. */
   measurements: { key: string; labelEn: string; labelAr: string; value: number; unit: string }[];
 }
@@ -156,11 +158,13 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
       .filter((p) => isMeasurementSnapshot(p.measurementSnapshot ?? p.sizeSnapshot))
       .map((p) => {
         const snapshot = (p.measurementSnapshot ?? p.sizeSnapshot) as unknown as MeasurementSnapshot;
+        const pieceVariant = p.sizeCode ? product.variants.find((v) => v.size === p.sizeCode) : null;
         return {
           id: p.id,
           pieceIndex: p.pieceIndex,
           kind: measurementKindOf(snapshot),
           sizeCode: p.sizeCode,
+          unitPriceBhd: pieceVariant?.priceBhd != null ? Number(pieceVariant.priceBhd) : null,
           measurements: snapshotToMeasurements(snapshot, snapshot.unit),
         };
       });
@@ -168,6 +172,17 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
     // A cut product must have one complete measurement config per piece.
     const needsMeasurements =
       Boolean(product.cut?.id) && (pieces.length !== item.quantity || pieces.length === 0);
+
+    // When a line carries one piece per ordered unit, price it as the sum of
+    // each piece's effective price (variant override or product base) so
+    // differently-priced sizes are charged accurately — matching the order. A
+    // piece with no override falls back to the product base, never to the
+    // representative variant price (which may itself be another piece's override).
+    const productBaseBhd = Number(product.priceBhd);
+    const perPiecePriced = pieces.length > 0 && pieces.length === item.quantity;
+    const lineTotalBhd = perPiecePriced
+      ? Math.round(pieces.reduce((sum, p) => sum + (p.unitPriceBhd ?? productBaseBhd), 0) * 1000) / 1000
+      : Math.round(unitPriceBhd * item.quantity * 1000) / 1000;
 
     lines.push({
       id: item.id,
@@ -182,7 +197,7 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
       colorEn: variant?.colorEn ?? null,
       colorAr: variant?.colorAr ?? null,
       unitPriceBhd,
-      lineTotalBhd: Math.round(unitPriceBhd * item.quantity * 1000) / 1000,
+      lineTotalBhd,
       stockStatus,
       available: available && !needsMeasurements,
       pieces,

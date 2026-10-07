@@ -116,6 +116,38 @@ export type Dict = {
     'title' | 'placeholder' | 'resultsFor' | 'suggestions' | 'products' | 'categories' | 'collections' | 'noResults' | 'noResultsBody' | 'tryThese' | 'viewAllResults' | 'startTyping',
     string
   >;
+  quickOrder: Record<
+    | 'title'
+    | 'lead'
+    | 'selectedFor'
+    | 'invalidTitle'
+    | 'invalidBody'
+    | 'revokedTitle'
+    | 'revokedBody'
+    | 'expiredTitle'
+    | 'expiredBody'
+    | 'unavailableTitle'
+    | 'unavailableBody'
+    | 'usedTitle'
+    | 'usedBody'
+    | 'viewOrder'
+    | 'placeOrder'
+    | 'measurementsNote'
+    | 'secureNote'
+    | 'payNote'
+    | 'pieces'
+    | 'piece'
+    | 'copyMeasurements'
+    | 'copied'
+    | 'savedProfile'
+    | 'useSavedProfile'
+    | 'chooseProfile'
+    | 'pieceIncomplete'
+    | 'confirmTitle'
+    | 'confirmBody'
+    | 'confirmAction',
+    string
+  >;
 };
 
 const en: Dict = {
@@ -578,6 +610,37 @@ const en: Dict = {
     viewAllResults: 'View all results',
     startTyping: 'Start typing to search the collection',
   },
+  quickOrder: {
+    title: 'Quick Order',
+    lead: 'This piece was selected for you. Review the details and complete your order.',
+    selectedFor: 'Selected for you',
+    invalidTitle: 'This link is not valid',
+    invalidBody: 'We could not find this link. Check that it was copied in full, or ask our team for a new one.',
+    revokedTitle: 'This link was revoked',
+    revokedBody: 'This link has been stopped. Contact us if you would like a new one to continue.',
+    expiredTitle: 'This link has expired',
+    expiredBody: 'This link is no longer active. Ask our team for a fresh link to complete your order.',
+    unavailableTitle: 'This piece is no longer available',
+    unavailableBody: 'The piece behind this link is no longer offered. Explore the collection or contact us for an alternative.',
+    usedTitle: 'An order was already created',
+    usedBody: 'This link has already been used to create an order. You can view it to follow its status.',
+    viewOrder: 'View order',
+    placeOrder: 'Place order',
+    measurementsNote: 'Made-to-order piece — we will confirm your measurements on WhatsApp after you order.',
+    secureNote: 'Secure checkout — payment details are never shown here.',
+    payNote: 'Cash on delivery or bank transfer available.',
+    pieces: 'Pieces',
+    piece: 'Piece',
+    copyMeasurements: 'Use same measurements for another piece',
+    copied: 'Copied',
+    savedProfile: 'Saved measurements',
+    useSavedProfile: 'Use my saved measurements',
+    chooseProfile: 'Choose a saved profile',
+    pieceIncomplete: 'Complete every piece before ordering.',
+    confirmTitle: 'Confirm your order',
+    confirmBody: 'This link creates one order and cannot be reused. Please check the details before confirming.',
+    confirmAction: 'Confirm order',
+  },
 };
 
 const ar: Dict = {
@@ -1039,6 +1102,37 @@ const ar: Dict = {
     tryThese: 'جرّبي',
     viewAllResults: 'عرض كل النتائج',
     startTyping: 'ابدئي الكتابة للبحث في المجموعة',
+  },
+  quickOrder: {
+    title: 'طلب سريع',
+    lead: 'تم إعداد هذه القطعة خصيصاً لك. راجعي التفاصيل ثم أكملي الطلب.',
+    selectedFor: 'مختارة لك',
+    invalidTitle: 'هذا الرابط غير صالح',
+    invalidBody: 'تعذّر العثور على هذا الرابط. تأكدي من نسخه كاملاً أو اطلبي رابطاً جديداً من فريقنا.',
+    revokedTitle: 'تم إلغاء هذا الرابط',
+    revokedBody: 'أُوقف هذا الرابط. تواصلي معنا لإرسال رابط جديد إن أردتِ المتابعة.',
+    expiredTitle: 'انتهت صلاحية هذا الرابط',
+    expiredBody: 'انتهت مدة صلاحية هذا الرابط. اطلبي من فريقنا رابطاً محدّثاً لإتمام الطلب.',
+    unavailableTitle: 'لم تعد القطعة متاحة',
+    unavailableBody: 'القطعة المرتبطة بهذا الرابط لم تعد متوفرة. استكشفي المجموعة أو تواصلي معنا لبديل.',
+    usedTitle: 'تم إنشاء الطلب مسبقاً',
+    usedBody: 'استُخدم هذا الرابط لإنشاء طلب. يمكنك عرض الطلب لمتابعة حالته.',
+    viewOrder: 'عرض الطلب',
+    placeOrder: 'إتمام الطلب',
+    measurementsNote: 'قطعة مصنوعة حسب الطلب — سنؤكد مقاساتك عبر واتساب بعد الطلب.',
+    secureNote: 'دفع آمن — لا تُعرض تفاصيل الدفع هنا.',
+    payNote: 'الدفع عند الاستلام أو التحويل البنكي متاح.',
+    pieces: 'القطع',
+    piece: 'القطعة',
+    copyMeasurements: 'استخدام المقاسات نفسها لقطعة أخرى',
+    copied: 'تم النسخ',
+    savedProfile: 'المقاسات المحفوظة',
+    useSavedProfile: 'استخدام مقاساتي المحفوظة',
+    chooseProfile: 'اختاري مقاساً محفوظاً',
+    pieceIncomplete: 'أكملي بيانات كل قطعة قبل الطلب.',
+    confirmTitle: 'تأكيد الطلب',
+    confirmBody: 'هذا الرابط يُنشئ طلباً واحداً ولا يمكن إعادة استخدامه. تأكدي من التفاصيل قبل المتابعة.',
+    confirmAction: 'تأكيد الطلب',
   },
 };
 

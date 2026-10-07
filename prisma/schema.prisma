@@ -328,6 +328,7 @@ model Product {
   orderItems         OrderItem[]
   wishlistItems      WishlistItem[]
   inventoryMovements InventoryMovement[]
+  quickOrderLinks    QuickOrderLink[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
@@ -724,7 +725,17 @@ model Order {
   // and provider return URLs land the customer in their own language.
   locale             String             @default("en")
   idempotencyKey     String?            @unique
+  // Fingerprint of the commercial payload that produced this order. A retry
+  // bearing the same idempotency key must present the same fingerprint; a
+  // materially different payload under the same key is rejected rather than
+  // silently applied to the existing order. Nullable for legacy orders and for
+  // submissions that carried no key.
+  idempotencyFingerprint String?         @db.Text
   channel            OrderChannel       @default(ONLINE)
+  // Set when the order originated from a Quick Order link, preserving the
+  // original acquisition source (WhatsApp / Instagram). The authoritative
+  // link relation is QuickOrderLink.orderId — this column is the source label.
+  quickOrderSource   QuickOrderSource?
   priority           Int                @default(0)
   internalNotes      String?            @db.Text
   createdById        String?
@@ -748,7 +759,7 @@ model Order {
   refunds            Refund[]
   events             OrderEvent[]
   productionTasks    ProductionTask[]
-  quickOrderLinks    QuickOrderLink[]
+  quickOrderLinks    QuickOrderLink[]  @relation("QuickOrderLinkOrder")
   redemptions        CouponRedemption[]
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -1433,17 +1444,30 @@ model QuickOrderLink {
   id            String           @id @default(cuid())
   // Internal human-readable id, e.g. QOL-2609-000123.
   code          String           @unique
-  // Public URL token. High-entropy; unique at the database level.
-  token         String           @unique
+  // SHA-256 digest of the public URL token. The raw token is shown to the
+  // creator once and never stored, so a database read cannot reconstruct a
+  // live link. Lookup is by hash, which is a unique index.
+  tokenHash     String           @unique
+  // Last four characters of the raw token — display only, not a secret.
+  tokenLast4    String
   productId     String
+  product       Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
   source        QuickOrderSource @default(WHATSAPP)
   createdById   String?
   createdBy     User?            @relation("QuickOrderLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  // Optional intended recipient. Not a secret and never shown on the public
+  // page; used by staff to prefill the WhatsApp send action.
   customerPhone String?
+  // Send action was initiated (e.g. a WhatsApp deep link was opened). This is
+  // NOT proof of delivery — no provider callback exists to confirm that.
   sentAt        DateTime?
+  // First open of a valid link. Set once; repeated opens do not rewrite it.
   openedAt      DateTime?
+  // Open count and last-open time, for staff insight only.
+  openCount     Int              @default(0)
+  lastOpenedAt  DateTime?
   orderId       String?
-  order         Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  order         Order?           @relation("QuickOrderLinkOrder", fields: [orderId], references: [id], onDelete: SetNull)
   expiresAt     DateTime?
   revokedAt     DateTime?
   createdAt     DateTime         @default(now())
@@ -1452,6 +1476,7 @@ model QuickOrderLink {
   @@index([productId])
   @@index([orderId])
   @@index([createdById])
+  @@index([createdAt])
 }
 
 // ───────────────────────────────────────────────────────────

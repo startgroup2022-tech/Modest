@@ -802,12 +802,17 @@ async function main() {
     }
 
     await prisma.productVariant.deleteMany({ where: { productId: product.id } });
-    for (let i = 0; i < p.sizes.length; i++) {
+    // A cut product is sold by the ready sizes of its own size chart, so its
+    // variants must be exactly those codes. Deriving them here (rather than from
+    // a hand-maintained `sizes` list) keeps variants and chart in lockstep — a
+    // cut product can never be seeded with sizes its chart does not offer.
+    const variantSizes = cutCode ? READY_SIZES : p.sizes;
+    for (let i = 0; i < variantSizes.length; i++) {
       await prisma.productVariant.create({
         data: {
           productId: product.id,
-          sku: `${p.slug.toUpperCase().replace(/-/g, '').slice(0, 12)}-${p.sizes[i]}`,
-          size: p.sizes[i],
+          sku: `${p.slug.toUpperCase().replace(/-/g, '').slice(0, 12)}-${variantSizes[i]}`,
+          size: variantSizes[i],
           stock: p.preOrder ? 0 : 4 + ((i * 3) % 7),
           stockStatus: p.preOrder ? 'PRE_ORDER' : 'IN_STOCK',
           sortOrder: i,

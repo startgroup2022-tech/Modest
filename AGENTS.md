@@ -205,6 +205,40 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   inactive code is rejected (`INVALID_SHIPPING`), never silently downgraded to a
   cheaper fallback; the fallback applies only when no methods exist.
 
+## Quick Order links (Phase 5)
+- A Quick Order link is an opaque handle to one product for one customer. The raw
+  token is shown once at creation and only its SHA-256 digest is stored
+  (`QuickOrderLink.tokenHash`, unique); `tokenLast4` is display-only. Nothing
+  trusted (price, name, tailoring fee, availability, measurement requirements,
+  payable amount) is ever encoded in the URL — the public page and the order API
+  resolve all of it from the DB by token hash.
+- `/q/[token]` is `noindex` and both `/en/q/` and `/ar/q/` are disallowed in
+  `robots.ts`: a link is a private handle and must never be crawled or indexed.
+- The public order route resolves **exactly one line, cart-free**. It never
+  touches the caller's cart, so a signed-in shopper cannot sweep unrelated bag
+  items into a quick order.
+- A size/variant is required whenever the product is sold by size — including a
+  cut product offered in ready sizes — so stock is enforced against that variant.
+  Variant prices are surfaced in both the storefront and admin quick-order forms
+  so the quoted total always matches what the server charges.
+- A cut line is priced per physical piece: when a line carries one piece per
+  ordered unit, its total is the sum of each piece's effective price (its
+  size-matched variant override, else the product base) and each `OrderItem`
+  carries that piece price. Differently-priced sizes therefore sum correctly
+  instead of one representative price being multiplied by the quantity. Lines
+  without per-piece data keep `unitPriceBhd × quantity`.
+- Link lifecycle states are derived from timestamps, never stored. `SEND_INITIATED`
+  means a send action began (a WhatsApp deep link was opened); it is explicitly
+  not proof of delivery. Opens are stamped best-effort on the public page so the
+  staff console's "opened" count reflects real usage.
+- Claiming a link is atomic inside the order transaction
+  (`where: { id, orderId: null, revokedAt: null }`); a second attempt raises
+  `CheckoutError('This quick order link has already been used', 'LINK_USED')`.
+  The order carries `channel: QUICK_ORDER` and `quickOrderSource`.
+- A staff manual discount is a first-class order amount (`manualDiscountBhd`,
+  clamped to the subtotal). It never rewrites per-line prices, and the final
+  amounts are persisted inside the order transaction.
+
 ## Deployment
 - cPanel target: see `DEPLOYMENT.md`. Entry point is `server.js` (Passenger).
 - Baseline Prisma migration is committed at `prisma/migrations/0_init`.

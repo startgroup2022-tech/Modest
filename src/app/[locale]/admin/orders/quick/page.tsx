@@ -7,6 +7,8 @@ import { isLocale, type Locale } from '@/i18n/config';
 import { label } from '@/lib/admin-format';
 import { PageHeader } from '@/components/admin/ui';
 import { QuickOrderForm } from '@/components/admin/QuickOrderForm';
+import { QuickOrderLinks } from '@/components/admin/QuickOrderLinks';
+import { listQuickOrderLinks } from '@/lib/quick-order-db';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Quick Order', robots: { index: false, follow: false } };
@@ -18,7 +20,7 @@ export default async function QuickOrderPage({ params }: { params: Promise<{ loc
   await requireAdminPage('orders.create', locale);
   const dict = getAdminDict(locale);
 
-  const [products, customers, shipping] = await Promise.all([
+  const [products, customers, shipping, links] = await Promise.all([
     prisma.product.findMany({
       where: { status: 'ACTIVE' },
       orderBy: { nameEn: 'asc' },
@@ -31,7 +33,7 @@ export default async function QuickOrderPage({ params }: { params: Promise<{ loc
         variants: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
-          select: { id: true, size: true, colorEn: true, stock: true, stockStatus: true },
+          select: { id: true, size: true, colorEn: true, priceBhd: true, stock: true, stockStatus: true },
         },
       },
     }),
@@ -41,6 +43,7 @@ export default async function QuickOrderPage({ params }: { params: Promise<{ loc
       include: { user: { select: { firstName: true, lastName: true, email: true } } },
     }),
     prisma.shippingMethod.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } }),
+    listQuickOrderLinks({ take: 50 }),
   ]);
 
   return (
@@ -58,6 +61,7 @@ export default async function QuickOrderPage({ params }: { params: Promise<{ loc
           variants: p.variants.map((v) => ({
             id: v.id,
             label: [v.size, v.colorEn].filter(Boolean).join(' / ') || '—',
+            priceBhd: v.priceBhd != null ? Number(v.priceBhd) : null,
             stock: v.stock,
             stockStatus: v.stockStatus,
           })),
@@ -80,6 +84,19 @@ export default async function QuickOrderPage({ params }: { params: Promise<{ loc
           { value: 'TAPP', label: label('TAPP', locale) },
         ]}
       />
+      <div className="mt-10">
+        <QuickOrderLinks
+          locale={locale}
+          dict={{ quickOrders: dict.quickOrders, common: dict.common, orders: dict.orders }}
+          currency="BHD"
+          links={links}
+          products={products.map((p) => ({
+            id: p.id,
+            name: locale === 'ar' ? p.nameAr : p.nameEn,
+            sku: p.sku,
+          }))}
+        />
+      </div>
     </>
   );
 }
