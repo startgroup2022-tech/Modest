@@ -2,6 +2,18 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
+export interface CartPiece {
+  id: string;
+  pieceIndex: number;
+  kind: 'READY' | 'CUSTOM' | null;
+  sizeCode: string | null;
+  measurements: { key: string; labelEn: string; labelAr: string; value: number; unit: string }[];
+}
+
+export type CartPieceInput =
+  | { mode: 'READY'; sizeCode: string }
+  | { mode: 'CUSTOM'; values: Record<string, number>; profileId?: string | null };
+
 export interface CartLine {
   id: string;
   productId: string;
@@ -16,6 +28,8 @@ export interface CartLine {
   lineTotalBhd: number;
   stockStatus: string;
   available: boolean;
+  pieces: CartPiece[];
+  needsMeasurements: boolean;
 }
 
 export interface CartState {
@@ -43,7 +57,7 @@ interface StoreContextValue {
   searchOpen: boolean;
   setCartOpen: (open: boolean) => void;
   setSearchOpen: (open: boolean) => void;
-  addItem: (productId: string, variantId: string | null, quantity?: number) => Promise<void>;
+  addItem: (productId: string, variantId: string | null, quantity?: number, pieces?: CartPieceInput[]) => Promise<void>;
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   refreshCart: () => Promise<void>;
@@ -89,13 +103,13 @@ export function StoreProvider({
     if (res.ok) setCart(await res.json());
   }, []);
 
-  const addItem = useCallback(async (productId: string, variantId: string | null, quantity = 1) => {
+  const addItem = useCallback(async (productId: string, variantId: string | null, quantity = 1, pieces?: CartPieceInput[]) => {
     setBusy(true);
     try {
       const res = await fetch('/api/cart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productId, variantId, quantity }),
+        body: JSON.stringify({ productId, variantId, quantity, pieces }),
       });
       if (res.ok) {
         setCart(await res.json());

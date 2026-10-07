@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 import { useStore } from '@/components/providers/StoreProvider';
 import { Price } from '@/components/ui/Price';
 import { LockIcon, CheckIcon } from '@/components/ui/icons';
+import { LineMeasurements } from '@/components/cart/LineMeasurements';
 import { formatMoney, roundBhd } from '@/lib/utils';
 import type { CartLineView } from '@/lib/cart';
 import type { Dict } from '@/i18n/dictionaries';
@@ -345,9 +346,14 @@ export function CheckoutForm({
         </section>
 
         {error ? (
-          <p role="alert" className="border border-danger/30 bg-danger/5 px-4 py-3 text-small text-danger">
-            {error}
-          </p>
+          <div role="alert" className="border border-danger/30 bg-danger/5 px-4 py-3 text-small text-danger">
+            <p>{error}</p>
+            {fieldError === 'cart' ? (
+              <Link href={`/${locale}/cart`} className="mt-2 inline-block underline underline-offset-4">
+                {dict.util.cart}
+              </Link>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -365,6 +371,12 @@ export function CheckoutForm({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-small">{locale === 'ar' ? item.nameAr : item.nameEn}</p>
                 {item.size ? <p className="text-caption text-ink-faint">{item.size}</p> : null}
+                <LineMeasurements
+                  pieces={item.pieces}
+                  needsMeasurements={item.needsMeasurements}
+                  locale={locale}
+                  labels={{ measurements: dict.product.perPieceMeasurements, required: dict.product.measurementsRequired }}
+                />
               </div>
               <Price amountBhd={item.lineTotalBhd} locale={locale} className="text-small" />
             </li>

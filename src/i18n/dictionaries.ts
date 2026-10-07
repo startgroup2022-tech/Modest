@@ -65,7 +65,11 @@ export type Dict = {
     | 'whatsappHelp'
     | 'addToWishlist'
     | 'madeToOrderLead'
-    | 'deliveryEstimate',
+    | 'deliveryEstimate'
+    | 'customMeasurements'
+    | 'readySize'
+    | 'measurementsRequired'
+    | 'perPieceMeasurements',
     string
   >;
   cart: Record<
@@ -86,7 +90,7 @@ export type Dict = {
     string
   >;
   common: Record<
-    | 'loading' | 'error' | 'notFound' | 'notFoundBody' | 'serverError' | 'serverErrorBody' | 'goHome' | 'back' | 'retry' | 'currency' | 'language' | 'optional' | 'required' | 'bhd' | 'whatsapp' | 'contactUs' | 'email' | 'phone' | 'address' | 'followUs' | 'quickLinks' | 'allRightsReserved' | 'networkError' | 'sessionExpired' | 'unavailable',
+    | 'loading' | 'error' | 'notFound' | 'notFoundBody' | 'serverError' | 'serverErrorBody' | 'goHome' | 'back' | 'retry' | 'currency' | 'language' | 'optional' | 'required' | 'bhd' | 'whatsapp' | 'contactUs' | 'email' | 'phone' | 'address' | 'followUs' | 'quickLinks' | 'allRightsReserved' | 'networkError' | 'sessionExpired' | 'unavailable' | 'decreaseQty' | 'increaseQty',
     string
   >;
   newsletter: Record<'success' | 'invalid' | 'alreadySubscribed', string>;
@@ -205,6 +209,10 @@ const en: Dict = {
     size: 'Size',
     sizeGuide: 'Size Guide',
     selectSize: 'Select a size',
+    customMeasurements: 'Custom measurements',
+    readySize: 'Ready size',
+    measurementsRequired: 'Choose a size or enter measurements',
+    perPieceMeasurements: 'Measurements',
     description: 'Description',
     details: 'Details',
     materials: 'Materials',
@@ -431,6 +439,8 @@ const en: Dict = {
     networkError: 'Network error. Please check your connection.',
     sessionExpired: 'Your session has expired. Please sign in again.',
     unavailable: 'Unavailable',
+    decreaseQty: 'Decrease quantity',
+    increaseQty: 'Increase quantity',
   },
   newsletter: {
     success: 'Thank you — you are on the list.',
@@ -629,6 +639,10 @@ const ar: Dict = {
     size: 'المقاس',
     sizeGuide: 'دليل المقاسات',
     selectSize: 'اختاري المقاس',
+    customMeasurements: 'قياسات خاصة',
+    readySize: 'مقاس جاهز',
+    measurementsRequired: 'اختاري مقاساً أو أدخلي القياسات',
+    perPieceMeasurements: 'القياسات',
     description: 'الوصف',
     details: 'التفاصيل',
     materials: 'الأقمشة',
@@ -855,6 +869,8 @@ const ar: Dict = {
     networkError: 'خطأ في الشبكة. تحققي من اتصالك.',
     sessionExpired: 'انتهت صلاحية جلستك. سجّلي الدخول مرة أخرى.',
     unavailable: 'غير متوفر',
+    decreaseQty: 'تقليل الكمية',
+    increaseQty: 'زيادة الكمية',
   },
   newsletter: {
     success: 'شكراً لك — تم تسجيلك في القائمة.',

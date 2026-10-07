@@ -8,6 +8,7 @@ import { useStore } from '@/components/providers/StoreProvider';
 import { Price } from '@/components/ui/Price';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { TrashIcon } from '@/components/ui/icons';
+import { LineMeasurements } from '@/components/cart/LineMeasurements';
 import { formatMoney, roundBhd } from '@/lib/utils';
 import type { CartLineView } from '@/lib/cart';
 import type { Dict } from '@/i18n/dictionaries';
@@ -127,6 +128,12 @@ export function CartView({
                         {dict.product.size}: {item.size}
                       </p>
                     ) : null}
+                    <LineMeasurements
+                      pieces={item.pieces}
+                      needsMeasurements={item.needsMeasurements}
+                      locale={locale}
+                      labels={{ measurements: dict.product.perPieceMeasurements, required: dict.product.measurementsRequired }}
+                    />
                     {!item.available ? (
                       <p className="mt-1 text-caption text-danger">{dict.common.unavailable}</p>
                     ) : null}

@@ -221,6 +221,8 @@ model Measurement {
 enum ProductStatus {
   DRAFT
   ACTIVE
+  PREORDER
+  UNAVAILABLE
   ARCHIVED
 }
 
@@ -314,6 +316,9 @@ model Product {
   // frozen onto the assignment/order item at assignment time and later edits
   // here must never change historical dues. No hidden fallback exists.
   tailorFeeBhd       Decimal?            @db.Decimal(10, 3)
+  // When true the storefront may display the remaining numeric quantity for a
+  // limited-stock piece. When false the quantity is hidden but still enforced.
+  showAvailability   Boolean             @default(true)
   media              ProductMedia[]
   variants           ProductVariant[]
   categories         ProductCategory[]
@@ -865,11 +870,37 @@ model CartItem {
   productId String
   variantId String?
   quantity  Int      @default(1)
+  // Stable grouping key for one commercial line. Encodes product + variant +
+  // the measurement configuration, so two pieces of the same product with
+  // different measurements stay separate lines ("" for legacy non-measurement
+  // lines, which the migration backfills to product|variant).
+  configKey String   @default("")
+  pieces    CartItemPiece[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([cartId, productId, variantId])
+  @@unique([cartId, configKey])
   @@index([cartId])
+}
+
+// One physical piece inside a cart line, carrying its own measurement
+// configuration. Written when the buyer configures a cut-based product; kept in
+// lockstep with CartItem.quantity so checkout can snapshot each piece.
+model CartItemPiece {
+  id                  String           @id @default(cuid())
+  cartItemId          String
+  cartItem            CartItem         @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  pieceIndex          Int
+  measurementKind     MeasurementKind?
+  sizeCode            String?
+  sizeSnapshot        Json?
+  measurementSnapshot Json?
+  cutId               String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@unique([cartItemId, pieceIndex])
+  @@index([cartItemId])
 }
 
 model Notification {

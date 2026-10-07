@@ -3,10 +3,23 @@ import { cookies } from 'next/headers';
 import { randomUUID } from 'node:crypto';
 import { prisma } from './prisma';
 import { getCurrentUser } from './auth';
+import { measurementKindOf, isMeasurementSnapshot, type MeasurementSnapshot } from './order-measurements';
+import { getCutForProduct } from './size-guide-db';
+import { configKeyFor, validatePieces, type PieceInput } from './measurement-plan';
+import { STOREFRONT_PRODUCT_STATUSES } from './catalog';
 
 export const CART_COOKIE = 'att_cart';
 export const WISHLIST_COOKIE = 'att_wishlist';
 const YEAR = 60 * 60 * 24 * 365;
+
+export interface CartPieceView {
+  id: string;
+  pieceIndex: number;
+  kind: 'READY' | 'CUSTOM' | null;
+  sizeCode: string | null;
+  /** Localisable rows rendered under the line in cart/checkout. */
+  measurements: { key: string; labelEn: string; labelAr: string; value: number; unit: string }[];
+}
 
 export interface CartLineView {
   id: string;
@@ -24,6 +37,21 @@ export interface CartLineView {
   lineTotalBhd: number;
   stockStatus: string;
   available: boolean;
+  /** Empty for products without a cut (simple size/variant lines). */
+  pieces: CartPieceView[];
+  /** True when the line still needs its per-piece measurements before checkout. */
+  needsMeasurements: boolean;
+}
+
+function simpleConfigKey(productId: string, variantId: string | null): string {
+  return `${productId}|${variantId ?? '_'}`;
+}
+
+function snapshotToMeasurements(snapshot: MeasurementSnapshot, unit: string) {
+  return Object.entries(snapshot.values).map(([key, value]) => {
+    const labels = snapshot.fieldLabels[key] ?? { en: key, ar: key };
+    return { key, labelEn: labels.en, labelAr: labels.ar, value, unit };
+  });
 }
 
 async function readCartId(): Promise<{ cartId: string | null; createdToken?: string }> {
@@ -84,6 +112,7 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
   const items = await prisma.cartItem.findMany({
     where: { cartId },
     orderBy: { createdAt: 'asc' },
+    include: { pieces: { orderBy: { pieceIndex: 'asc' } } },
   });
   if (!items.length) return { id: cartId, items: [], count: 0, subtotalBhd: 0 };
 
@@ -92,6 +121,7 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
     include: {
       media: { orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }], take: 1 },
       variants: true,
+      cut: { select: { id: true } },
     },
   });
   const byId = new Map(products.map((p) => [p.id, p]));
@@ -99,7 +129,7 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
   const lines: CartLineView[] = [];
   for (const item of items) {
     const product = byId.get(item.productId);
-    if (!product || product.status !== 'ACTIVE') continue;
+    if (!product || !STOREFRONT_PRODUCT_STATUSES.includes(product.status)) continue;
     const variant = item.variantId ? product.variants.find((v) => v.id === item.variantId) : null;
     const unitPriceBhd = Number(variant?.priceBhd ?? product.priceBhd);
 
@@ -122,6 +152,23 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
       available = true;
     }
 
+    const pieces: CartPieceView[] = item.pieces
+      .filter((p) => isMeasurementSnapshot(p.measurementSnapshot ?? p.sizeSnapshot))
+      .map((p) => {
+        const snapshot = (p.measurementSnapshot ?? p.sizeSnapshot) as unknown as MeasurementSnapshot;
+        return {
+          id: p.id,
+          pieceIndex: p.pieceIndex,
+          kind: measurementKindOf(snapshot),
+          sizeCode: p.sizeCode,
+          measurements: snapshotToMeasurements(snapshot, snapshot.unit),
+        };
+      });
+
+    // A cut product must have one complete measurement config per piece.
+    const needsMeasurements =
+      Boolean(product.cut?.id) && (pieces.length !== item.quantity || pieces.length === 0);
+
     lines.push({
       id: item.id,
       productId: product.id,
@@ -131,13 +178,15 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
       nameAr: product.nameAr,
       slug: product.slug,
       image: product.media[0]?.url ?? null,
-      size: variant?.size ?? null,
+      size: variant?.size ?? (pieces.length === 1 ? pieces[0].sizeCode : null),
       colorEn: variant?.colorEn ?? null,
       colorAr: variant?.colorAr ?? null,
       unitPriceBhd,
       lineTotalBhd: Math.round(unitPriceBhd * item.quantity * 1000) / 1000,
       stockStatus,
-      available,
+      available: available && !needsMeasurements,
+      pieces,
+      needsMeasurements,
     });
   }
   // Unavailable pieces must not contribute to the subtotal the buyer sees.
@@ -146,13 +195,22 @@ export async function getCartView(): Promise<{ id: string | null; items: CartLin
   return { id: cartId, items: lines, count: purchasable.reduce((s, l) => s + l.quantity, 0), subtotalBhd };
 }
 
-export async function addToCart(productId: string, variantId: string | null, quantity: number) {
+export async function addToCart(
+  productId: string,
+  variantId: string | null,
+  quantity: number,
+  pieces?: PieceInput[],
+) {
   const cartId = await ensureCart();
   const product = await prisma.product.findFirst({
-    where: { id: productId, status: 'ACTIVE' },
-    include: { variants: true },
+    where: { id: productId, status: { in: STOREFRONT_PRODUCT_STATUSES } },
+    include: { variants: { where: { isActive: true } } },
   });
   if (!product) throw new Error('PRODUCT_UNAVAILABLE');
+
+  const cut = await getCutForProduct(productId);
+  if (cut) return addCutProduct(cartId, product, cut, quantity, pieces);
+
   if (product.variants.length > 0 && !variantId) throw new Error('VARIANT_REQUIRED');
 
   // Stock is enforced here as well as at checkout so an unavailable size can
@@ -170,14 +228,101 @@ export async function addToCart(productId: string, variantId: string | null, qua
     }
   }
 
-  const existing = await prisma.cartItem.findFirst({
-    where: { cartId, productId, variantId: variantId ?? null },
-  });
+  const configKey = simpleConfigKey(productId, variantId ?? null);
+  const existing = await prisma.cartItem.findFirst({ where: { cartId, configKey } });
   const nextQty = Math.min(maxQty, (existing?.quantity ?? 0) + quantity);
   if (existing) {
     await prisma.cartItem.update({ where: { id: existing.id }, data: { quantity: nextQty } });
   } else {
-    await prisma.cartItem.create({ data: { cartId, productId, variantId: variantId ?? null, quantity: Math.min(maxQty, quantity) } });
+    await prisma.cartItem.create({
+      data: { cartId, productId, variantId: variantId ?? null, quantity: Math.min(maxQty, quantity), configKey },
+    });
+  }
+  return getCartView();
+}
+
+/**
+ * Cut-based products carry one measurement configuration per physical piece.
+ * The client sends only intent; every piece is re-validated and snapshotted
+ * server-side from the product's stored cut.
+ */
+async function addCutProduct(
+  cartId: string,
+  product: { id: string; madeToOrder: boolean; variants: { id: string; size: string | null; stock: number; stockStatus: string; isActive: boolean }[] },
+  cut: import('./size-guide-db').CutGuide,
+  quantity: number,
+  pieces?: PieceInput[],
+) {
+  if (!pieces || pieces.length !== quantity) throw new Error('MEASUREMENTS_REQUIRED');
+  const result = validatePieces(cut, pieces);
+  if (!result.ok) {
+    const suffix = result.error.fieldKey ? `:${result.error.fieldKey}` : '';
+    throw new Error(`MEASUREMENT_INVALID:${result.error.code}${suffix}`);
+  }
+
+  // READY pieces resolve to the size-matched variant so stock is still enforced.
+  let maxQty = 20;
+  let representativeVariant: string | null = null;
+  for (const piece of result.pieces) {
+    if (piece.sizeCode) {
+      const variant = product.variants.find((v) => v.size === piece.sizeCode);
+      if (product.variants.length > 0 && !variant) throw new Error('VARIANT_UNAVAILABLE');
+      if (variant) {
+        if (representativeVariant === null) representativeVariant = variant.id;
+        if (variant.stockStatus === 'OUT_OF_STOCK') throw new Error('VARIANT_UNAVAILABLE');
+        if (!product.madeToOrder && variant.stockStatus !== 'PRE_ORDER') {
+          if (variant.stock < pieces.filter((p) => p.mode === 'READY' && p.sizeCode === piece.sizeCode).length) {
+            throw new Error('VARIANT_UNAVAILABLE');
+          }
+          maxQty = Math.min(maxQty, variant.stock);
+        }
+      }
+    }
+  }
+
+  const configKey = configKeyFor(product.id, representativeVariant, result.pieces);
+  const existing = await prisma.cartItem.findFirst({ where: { cartId, configKey } });
+  const target = Math.min(maxQty, (existing?.quantity ?? 0) + quantity);
+  if (target < quantity) throw new Error('MAX_QUANTITY');
+
+  if (existing) {
+    // Same configuration regroups; the new pieces append with fresh indices.
+    const start = existing.quantity;
+    await prisma.cartItem.update({ where: { id: existing.id }, data: { quantity: target } });
+    for (let i = 0; i < quantity; i++) {
+      const piece = result.pieces[i];
+      await prisma.cartItemPiece.create({
+        data: {
+          cartItemId: existing.id,
+          pieceIndex: start + i,
+          measurementKind: piece.snapshot.kind,
+          sizeCode: piece.sizeCode,
+          sizeSnapshot: piece.snapshot.kind === 'READY' ? (piece.snapshot as never) : undefined,
+          measurementSnapshot: piece.snapshot as never,
+          cutId: cut.id,
+        },
+      });
+    }
+  } else {
+    await prisma.cartItem.create({
+      data: {
+        cartId,
+        productId: product.id,
+        variantId: representativeVariant,
+        quantity,
+        configKey,
+        pieces: {
+          create: result.pieces.map((piece, i) => ({
+            pieceIndex: i,
+            measurementKind: piece.snapshot.kind,
+            sizeCode: piece.sizeCode,
+            sizeSnapshot: piece.snapshot.kind === 'READY' ? (piece.snapshot as never) : undefined,
+            measurementSnapshot: piece.snapshot as never,
+            cutId: cut.id,
+          })),
+        },
+      },
+    });
   }
   return getCartView();
 }
@@ -185,12 +330,41 @@ export async function addToCart(productId: string, variantId: string | null, qua
 export async function updateCartItem(itemId: string, quantity: number) {
   const cartId = await peekCartId();
   if (!cartId) throw new Error('CART_UNAVAILABLE');
-  const item = await prisma.cartItem.findFirst({ where: { id: itemId, cartId } });
+  const item = await prisma.cartItem.findFirst({ where: { id: itemId, cartId }, include: { pieces: true } });
   if (!item) throw new Error('ITEM_NOT_FOUND');
   if (quantity <= 0) {
     await prisma.cartItem.delete({ where: { id: item.id } });
+    return getCartView();
+  }
+  const target = Math.min(20, quantity);
+
+  // Cut products keep one piece per unit. Growing the line clones the last
+  // piece's configuration; shrinking removes the highest-index pieces — the
+  // remaining measurement choices are never silently dropped or rewritten.
+  if (item.pieces.length > 0) {
+    const ordered = [...item.pieces].sort((a, b) => a.pieceIndex - b.pieceIndex);
+    if (target < ordered.length) {
+      const toRemove = ordered.slice(target).map((p) => p.id);
+      await prisma.cartItemPiece.deleteMany({ where: { id: { in: toRemove } } });
+    } else if (target > ordered.length) {
+      const template = ordered[ordered.length - 1];
+      for (let i = ordered.length; i < target; i++) {
+        await prisma.cartItemPiece.create({
+          data: {
+            cartItemId: item.id,
+            pieceIndex: i,
+            measurementKind: template.measurementKind,
+            sizeCode: template.sizeCode,
+            sizeSnapshot: template.sizeSnapshot as never,
+            measurementSnapshot: template.measurementSnapshot as never,
+            cutId: template.cutId,
+          },
+        });
+      }
+    }
+    await prisma.cartItem.update({ where: { id: item.id }, data: { quantity: target } });
   } else {
-    await prisma.cartItem.update({ where: { id: item.id }, data: { quantity: Math.min(20, quantity) } });
+    await prisma.cartItem.update({ where: { id: item.id }, data: { quantity: target } });
   }
   return getCartView();
 }
@@ -213,7 +387,7 @@ export async function mergeGuestCartInto(customerId: string) {
   const store = await cookies();
   const token = store.get(CART_COOKIE)?.value;
   if (!token) return;
-  const guest = await prisma.cart.findUnique({ where: { token }, include: { items: true } });
+  const guest = await prisma.cart.findUnique({ where: { token }, include: { items: { include: { pieces: true } } } });
   if (!guest) return;
 
   const customerCart =
@@ -222,7 +396,7 @@ export async function mergeGuestCartInto(customerId: string) {
 
   for (const item of guest.items) {
     const existing = await prisma.cartItem.findFirst({
-      where: { cartId: customerCart.id, productId: item.productId, variantId: item.variantId },
+      where: { cartId: customerCart.id, configKey: item.configKey },
     });
     if (existing) {
       await prisma.cartItem.update({
@@ -231,7 +405,13 @@ export async function mergeGuestCartInto(customerId: string) {
       });
     } else {
       await prisma.cartItem.create({
-        data: { cartId: customerCart.id, productId: item.productId, variantId: item.variantId, quantity: item.quantity },
+        data: {
+          cartId: customerCart.id,
+          productId: item.productId,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          configKey: item.configKey,
+        },
       });
     }
   }

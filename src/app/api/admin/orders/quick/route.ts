@@ -62,6 +62,9 @@ export const POST = adminHandler('orders.create', async ({ admin, req }) => {
   const shippingBhd = Number(shipping.priceBhd);
   const lines = await resolveCartLines(
     input.items.map((i) => ({ productId: i.productId, variantId: i.variantId ?? null, quantity: i.quantity })),
+    // Staff quick-order entries are size-only: there is no buyer cart to read a
+    // measurement configuration from, so no per-piece snapshot is required.
+    { requireMeasurements: false },
   );
 
   const totals = computeTotals(

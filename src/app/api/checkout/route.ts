@@ -153,7 +153,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     if (err instanceof CheckoutError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 400 });
+      const isMeasurements =
+        err.message.startsWith('Please choose your measurements') || err.message.startsWith('A piece is missing');
+      return NextResponse.json(
+        { error: err.message, code: err.code, field: isMeasurements ? 'cart' : undefined },
+        { status: 400 },
+      );
     }
     console.error('[checkout] failed', err);
     return NextResponse.json({ error: 'We could not place your order. Please try again.' }, { status: 500 });

@@ -9,6 +9,7 @@ import { Price } from '@/components/ui/Price';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { BagIcon, CloseIcon, TrashIcon } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/Spinner';
+import { LineMeasurements } from '@/components/cart/LineMeasurements';
 import type { Dict } from '@/i18n/dictionaries';
 import type { Locale } from '@/i18n/config';
 
@@ -119,6 +120,12 @@ export function CartDrawer({ locale, dict }: { locale: Locale; dict: Dict }) {
                         {dict.product.size}: {line.size}
                       </p>
                     ) : null}
+                    <LineMeasurements
+                      pieces={line.pieces}
+                      needsMeasurements={line.needsMeasurements}
+                      locale={locale}
+                      labels={{ measurements: dict.product.perPieceMeasurements, required: dict.product.measurementsRequired }}
+                    />
                     <div className="mt-auto flex items-center justify-between pt-3">
                       <div className="flex items-center border border-line">
                         <button

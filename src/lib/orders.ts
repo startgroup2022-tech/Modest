@@ -4,6 +4,9 @@ import { computeTotals, type CouponLike } from './money';
 import { roundBhd } from './utils';
 import { nextSequence, monthlyScope } from './sequences';
 import { getPaymentProvider, type PaymentInitResult } from './payments';
+import { peekCartId } from './cart';
+import { isMeasurementSnapshot } from './order-measurements';
+import { STOREFRONT_PRODUCT_STATUSES } from './catalog';
 import type { CheckoutInput } from './validation';
 import type { OrderStatus, Prisma, PaymentStatus } from '@prisma/client';
 
@@ -17,6 +20,9 @@ export interface ResolvedLine {
   sku: string | null;
   imageUrl: string | null;
   stockStatus: string;
+  cutId: string | null;
+  /** One entry per physical piece; empty for lines without measurements. */
+  pieces: { measurementKind: 'READY' | 'CUSTOM' | null; sizeCode: string | null; sizeSnapshot: unknown; measurementSnapshot: unknown }[];
 }
 
 export class CheckoutError extends Error {
@@ -46,7 +52,11 @@ interface RawLine {
  * from the server — the client can never dictate a price. Unavailable or
  * archived products are rejected rather than silently dropped.
  */
-export async function resolveCartLines(lines: RawLine[]): Promise<ResolvedLine[]> {
+export async function resolveCartLines(
+  lines: RawLine[],
+  options: { requireMeasurements?: boolean } = {},
+): Promise<ResolvedLine[]> {
+  const requireMeasurements = options.requireMeasurements ?? true;
   if (!lines.length) return [];
   const productIds = [...new Set(lines.map((l) => l.productId))];
   const products = await prisma.product.findMany({
@@ -54,14 +64,26 @@ export async function resolveCartLines(lines: RawLine[]): Promise<ResolvedLine[]
     include: {
       media: { orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }], take: 1 },
       variants: true,
+      cut: { select: { id: true } },
     },
   });
   const byId = new Map(products.map((p) => [p.id, p]));
   const resolved: ResolvedLine[] = [];
 
+  // Cart-line measurement configs, keyed by product+variant+quantity so the
+  // client cannot inject a snapshot: the pieces are read back from the cart and
+  // validated against each product's stored cut.
+  const cartId = requireMeasurements ? await peekCartId() : null;
+  const cartItems = cartId
+    ? await prisma.cartItem.findMany({
+        where: { cartId },
+        include: { pieces: { orderBy: { pieceIndex: 'asc' } } },
+      })
+    : [];
+
   for (const line of lines) {
     const product = byId.get(line.productId);
-    if (!product || product.status !== 'ACTIVE') {
+    if (!product || !STOREFRONT_PRODUCT_STATUSES.includes(product.status)) {
       throw new CheckoutError(`Product ${line.productId} is unavailable`, 'UNAVAILABLE');
     }
     let unitPrice = Number(product.priceBhd);
@@ -90,6 +112,39 @@ export async function resolveCartLines(lines: RawLine[]): Promise<ResolvedLine[]
       throw new CheckoutError('Invalid quantity', 'UNAVAILABLE');
     }
 
+    // Cut products must carry one complete measurement config per piece. The
+    // snapshots are frozen from the cart's own copies (written server-side at
+    // add-to-cart), so a tampered client payload cannot influence them.
+    const pieces: ResolvedLine['pieces'] = [];
+    if (product.cut?.id) {
+      if (!requireMeasurements) {
+        const sizeCode = line.variantId
+          ? (product.variants.find((v) => v.id === line.variantId && v.isActive)?.size ?? null)
+          : null;
+        pieces.push({ measurementKind: null, sizeCode, sizeSnapshot: null, measurementSnapshot: null });
+      } else {
+        const cartItem =
+          cartItems.find((c) => c.productId === line.productId && (c.variantId ?? null) === (line.variantId ?? null)) ??
+          cartItems.find((c) => c.productId === line.productId);
+        const source = cartItem?.pieces ?? [];
+        if (source.length !== line.quantity) {
+          throw new CheckoutError('Please choose your measurements', 'UNAVAILABLE');
+        }
+        for (const p of source) {
+          const snapshot = (p.measurementSnapshot ?? p.sizeSnapshot) as unknown;
+          if (!isMeasurementSnapshot(snapshot)) {
+            throw new CheckoutError('A piece is missing its measurements', 'UNAVAILABLE');
+          }
+          pieces.push({
+            measurementKind: p.measurementKind,
+            sizeCode: p.sizeCode,
+            sizeSnapshot: p.sizeSnapshot,
+            measurementSnapshot: p.measurementSnapshot,
+          });
+        }
+      }
+    }
+
     resolved.push({
       productId: product.id,
       variantId: line.variantId ?? null,
@@ -100,6 +155,8 @@ export async function resolveCartLines(lines: RawLine[]): Promise<ResolvedLine[]
       sku,
       imageUrl: product.media[0]?.url ?? null,
       stockStatus,
+      cutId: product.cut?.id ?? null,
+      pieces,
     });
   }
   return resolved;
@@ -192,17 +249,44 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
         couponCode: checkout.couponCode || null,
         idempotencyKey: input.idempotencyKey ?? null,
         items: {
-          create: lines.map((l) => ({
-            productId: l.productId,
-            variantId: l.variantId,
-            productName: l.productName,
-            variantLabel: l.variantLabel,
-            sku: l.sku,
-            imageUrl: l.imageUrl,
-            unitPriceBhd: l.unitPriceBhd,
-            quantity: l.quantity,
-            lineTotalBhd: roundBhd(l.unitPriceBhd * l.quantity),
-          })),
+          // A cut product is itemised one OrderItem per physical piece so each
+          // carries its own immutable measurement snapshot, tailors can be
+          // assigned and settled per piece, and QC history is per piece. Simple
+          // lines keep the grouped quantity.
+          create: lines.flatMap((l) => {
+            const hasSnapshot = l.pieces.some((p) => p.measurementSnapshot || p.sizeSnapshot);
+            if (hasSnapshot) {
+              return l.pieces.map((p) => ({
+                productId: l.productId,
+                variantId: l.variantId,
+                productName: l.productName,
+                variantLabel: p.sizeCode ?? l.variantLabel,
+                sku: l.sku,
+                imageUrl: l.imageUrl,
+                unitPriceBhd: l.unitPriceBhd,
+                quantity: 1,
+                lineTotalBhd: roundBhd(l.unitPriceBhd),
+                measurementKind: p.measurementKind ?? undefined,
+                sizeCode: p.sizeCode,
+                sizeSnapshot: (p.sizeSnapshot ?? undefined) as Prisma.InputJsonValue | undefined,
+                measurementSnapshot: (p.measurementSnapshot ?? undefined) as Prisma.InputJsonValue | undefined,
+                cutId: l.cutId,
+              }));
+            }
+            return [
+              {
+                productId: l.productId,
+                variantId: l.variantId,
+                productName: l.productName,
+                variantLabel: l.variantLabel,
+                sku: l.sku,
+                imageUrl: l.imageUrl,
+                unitPriceBhd: l.unitPriceBhd,
+                quantity: l.quantity,
+                lineTotalBhd: roundBhd(l.unitPriceBhd * l.quantity),
+              },
+            ];
+          }),
         },
         events: {
           create: { status: 'PENDING', messageEn: 'Order placed', messageAr: 'تم إنشاء الطلب' },

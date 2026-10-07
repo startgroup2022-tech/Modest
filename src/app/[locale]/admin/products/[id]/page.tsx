@@ -33,6 +33,9 @@ function toForm(p: {
   compareAtBhd: unknown;
   status: string;
   kind: string;
+  cutId: string | null;
+  tailorFeeBhd: unknown;
+  showAvailability: boolean;
   isFeatured: boolean;
   isNewArrival: boolean;
   madeToOrder: boolean;
@@ -63,6 +66,9 @@ function toForm(p: {
     compareAtBhd: p.compareAtBhd == null ? '' : String(p.compareAtBhd),
     status: p.status,
     kind: p.kind,
+    cutId: p.cutId ?? '',
+    tailorFeeBhd: p.tailorFeeBhd == null ? '' : String(p.tailorFeeBhd),
+    showAvailability: p.showAvailability,
     isFeatured: p.isFeatured,
     isNewArrival: p.isNewArrival,
     madeToOrder: p.madeToOrder,
@@ -91,7 +97,7 @@ export default async function EditProductPage({
   const dict = getAdminDict(locale);
   const href = (p: string) => adminHref(locale, p);
 
-  const [product, categories, collections] = await Promise.all([
+  const [product, categories, collections, cuts] = await Promise.all([
     prisma.product.findUnique({
       where: { id },
       include: {
@@ -103,6 +109,7 @@ export default async function EditProductPage({
     }),
     prisma.category.findMany({ orderBy: { sortOrder: 'asc' } }),
     prisma.collection.findMany({ orderBy: { sortOrder: 'asc' } }),
+    prisma.productCut.findMany({ where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }] }),
   ]);
   if (!product) notFound();
 
@@ -132,6 +139,7 @@ export default async function EditProductPage({
               dict={{ products: dict.products, common: dict.common }}
               categories={categories.map((c) => ({ id: c.id, name: locale === 'ar' ? c.nameAr : c.nameEn }))}
               collections={collections.map((c) => ({ id: c.id, name: locale === 'ar' ? c.nameAr : c.nameEn }))}
+              cuts={cuts.map((c) => ({ id: c.id, code: c.code, name: locale === 'ar' ? c.nameAr : c.nameEn }))}
             />
           </Panel>
         </div>

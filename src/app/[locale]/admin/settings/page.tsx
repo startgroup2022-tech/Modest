@@ -11,6 +11,7 @@ import { CurrencyManager } from '@/components/admin/CurrencyManager';
 import { PaymentMethodManager } from '@/components/admin/PaymentMethodManager';
 import { getPaymentConfigs } from '@/lib/payment-config';
 import { maskSecret } from '@/lib/admin/settings';
+import { SizeGuideManager, type CutRow } from '@/components/admin/catalog/SizeGuideManager';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Settings', robots: { index: false, follow: false } };
@@ -40,6 +41,49 @@ export default async function SettingsPage({
   };
   const currencies = await prisma.currency.findMany({ orderBy: { sortOrder: 'asc' } });
   const paymentConfigs = await getPaymentConfigs();
+
+  const cuts = await prisma.productCut.findMany({
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    include: {
+      sizeCharts: { include: { values: true } },
+      fields: { orderBy: { sortOrder: 'asc' } },
+    },
+  });
+  const cutRows: CutRow[] = cuts.map((cut) => {
+    const chart = cut.sizeCharts[0] ?? null;
+    const sizes = chart
+      ? [...new Set(chart.values.map((v) => v.sizeCode))].sort(
+          (a, b) => ['XS', 'S', 'M', 'L', 'XL'].indexOf(a) - ['XS', 'S', 'M', 'L', 'XL'].indexOf(b),
+        )
+      : [];
+    return {
+      id: cut.id,
+      code: cut.code,
+      nameEn: cut.nameEn,
+      nameAr: cut.nameAr,
+      descriptionEn: cut.descriptionEn,
+      descriptionAr: cut.descriptionAr,
+      isActive: cut.isActive,
+      sortOrder: cut.sortOrder,
+      sizes,
+      fields: cut.fields.map((f) => ({
+        id: f.id,
+        key: f.key,
+        labelEn: f.labelEn,
+        labelAr: f.labelAr,
+        unit: f.unit,
+        minValue: f.minValue != null ? Number(f.minValue) : null,
+        maxValue: f.maxValue != null ? Number(f.maxValue) : null,
+        helperEn: f.helperEn,
+        helperAr: f.helperAr,
+        isActive: f.isActive,
+        sortOrder: f.sortOrder,
+        values: Object.fromEntries(
+          (chart?.values ?? []).filter((v) => v.fieldId === f.id).map((v) => [v.sizeCode, Number(v.value)]),
+        ),
+      })),
+    };
+  });
 
   const store = get('store');
   const checkout = get('checkout');
@@ -112,6 +156,7 @@ export default async function SettingsPage({
     { key: 'payments', label: s.payments, href: `?tab=payments` },
     { key: 'shipping', label: s.shipping, href: `?tab=shipping` },
     { key: 'currencies', label: s.currencies, href: `?tab=currencies` },
+    { key: 'sizeguide', label: locale === 'ar' ? 'دليل القياسات' : 'Size guide', href: `?tab=sizeguide` },
   ];
 
   const canEdit = admin.permissions.has('settings.edit');
@@ -209,6 +254,20 @@ export default async function SettingsPage({
             dict={{ common: dict.common, system: dict.system }}
             canEdit={canEdit}
           />
+        </Panel>
+      )}
+
+      {tab === 'sizeguide' && (
+        <Panel
+          title={locale === 'ar' ? 'دليل القياسات والقَصّات' : 'Size guide & silhouettes'}
+          bodyClassName="p-0"
+        >
+          <p className="px-5 pt-4 text-caption text-ink-faint">
+            {locale === 'ar'
+              ? 'تُدار القَصّات وحقول القياس من هنا، وتظهر مباشرة على صفحات المنتج.'
+              : 'Cuts and measurement fields are managed here and appear directly on product pages.'}
+          </p>
+          <SizeGuideManager cuts={cutRows} locale={locale} canEdit={canEdit} />
         </Panel>
       )}
     </>
