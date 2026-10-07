@@ -115,6 +115,24 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   can strip a real seeded permission (this happened to SUPPORT `orders.view`).
 - After DB tests, re-seed roles if in doubt: `npx prisma db seed`.
 
+## Catalog lifecycle & made-to-measure (Phase 3)
+- Storefront visibility is one rule: `STOREFRONT_PRODUCT_STATUSES` in
+  `src/lib/catalog.ts` (`ACTIVE`, `PREORDER`). `DRAFT`, `UNAVAILABLE` and
+  `ARCHIVED` never reach listings, PDP, search or counts. Change the list, not
+  each query, to alter visibility.
+- A cut-based product (`Product.cutId` set) is configured per physical piece.
+  `CartItem.configKey` groups a commercial line by product+variant+measurement
+  config; `CartItemPiece` rows hold one identity per unit and are written
+  server-side at add-to-cart. `resolveCartLines` re-reads those snapshots from
+  the stored cart (never from the client) and validates against the product's
+  stored cut; cut lines then itemise one `OrderItem` per piece.
+- Staff quick-order passes `{ requireMeasurements: false }`; buyer checkout is
+  measured by default.
+- The size guide (`/[locale]/size-guide`) and `SizeGuideManager` are DB-backed
+  by `ProductCut`/`MeasurementField`/`SizeChart`. Admin edits go live
+  immediately. Deleting an in-use cut archives it instead of removing it, so
+  historical order snapshots stay intact.
+
 ## Admin resources → storefront
 - Admin Promotions drive the storefront: `placement: "announcement"` renders the
   dismissible `AnnouncementBar` in the storefront layout; `placement: "home_banner"`
