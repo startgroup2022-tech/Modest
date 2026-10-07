@@ -81,7 +81,13 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   (non-ADMIN) from granting a permission they do not themselves hold. Applied
   in `PUT /api/admin/employees/[id]/permissions`, the employee create/update
   routes, and `PATCH /api/admin/roles/[id]`. Self-lockout (disabling or
-  demoting yourself, or stripping your own `users.manage`) is refused.
+  demoting yourself, or stripping your own `users.manage`) is refused for every
+  role, ADMIN included (`SELF_LOCKOUT`, 409).
+- Last-effective-admin guard: `countEffectiveAdmins` (`src/lib/admin-auth.ts`)
+  counts active ADMIN users whose *resolved* permissions still include
+  `users.manage`. The permissions endpoint refuses to strip the final such
+  admin (`LAST_ADMIN`, 409), so a DENY override cannot make the system
+  unadministrable.
 - Tailors authenticate through a separate `TailorCredential` (bcrypt hash only)
   and `att_tailor` cookie; an admin issues a one-time temporary password via
   `POST /api/admin/tailors/[id]/credentials` (returned once, never persisted).

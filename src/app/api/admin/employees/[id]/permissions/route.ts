@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { adminHandler, AdminActionError, isSuperAdmin } from '@/lib/admin-auth';
+import { adminHandler, AdminActionError, isSuperAdmin, countEffectiveAdmins } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
 import { bumpSessionVersion } from '@/lib/auth';
 import {
@@ -54,11 +54,11 @@ export const PUT = adminHandler('users.manage', async ({ admin, req, ip }) => {
     }
   }
 
-  // Self-protection: an administrator must not strip their own ability to
-  // administer employees, which would make the permission system unmanageable.
+  // Self-protection: an employee must not strip their own ability to administer
+  // employees, which would make the permission system unmanageable for them.
   if (existing.id === admin.id) {
     const after = resolveEffectivePermissions(await getRolePermissions(existing.roleId), desired);
-    if (admin.role !== 'ADMIN' && !after.has('users.manage')) {
+    if (!after.has('users.manage')) {
       return NextResponse.json(
         { error: 'You cannot remove your own employee-management permission', code: 'SELF_LOCKOUT' },
         { status: 409 },
@@ -71,6 +71,22 @@ export const PUT = adminHandler('users.manage', async ({ admin, req, ip }) => {
     existing.permissionOverrides.map((o) => ({ permission: o.permission, effect: o.effect })),
   );
   const after = resolveEffectivePermissions(await getRolePermissions(existing.roleId), desired);
+
+  // Guard against removing the last effective administrator. A DENY override
+  // can strip `users.manage` from an admin just as a role change can, so this
+  // measures the resolved set rather than the role name alone.
+  const losingManage =
+    before.has('users.manage') && !after.has('users.manage') && existing.role?.name === 'ADMIN' && existing.isActive;
+  if (losingManage) {
+    const remaining = await countEffectiveAdmins(existing.id);
+    if (remaining === 0) {
+      return NextResponse.json(
+        { error: 'At least one administrator able to manage employees must remain', code: 'LAST_ADMIN' },
+        { status: 409 },
+      );
+    }
+  }
+
   const added = [...after].filter((p) => !before.has(p));
   const removed = [...before].filter((p) => !after.has(p));
 

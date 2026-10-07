@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { prisma } from '@/lib/prisma';
 import { resolveEffectivePermissions, getRolePermissions } from '@/lib/permissions';
 import { bumpSessionVersion } from '@/lib/auth';
+import { countEffectiveAdmins } from '@/lib/admin-auth';
 import {
   issueTailorCredentials,
   authenticateTailor,
@@ -130,6 +131,27 @@ maybe('phase 2 auth & permissions (database)', () => {
     const before = await prisma.user.findUnique({ where: { id: employeeId }, select: { sessionVersion: true } });
     const after = await bumpSessionVersion(employeeId);
     expect(after).toBe((before?.sessionVersion ?? 0) + 1);
+  });
+
+  it('counts only admins whose effective permissions still include users.manage', async () => {
+    const baseline = await countEffectiveAdmins();
+
+    // Make the test employee an ADMIN, but DENY users.manage via an override:
+    // the role alone would count, the resolved set must not.
+    const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } });
+    await prisma.user.update({ where: { id: employeeId }, data: { roleId: adminRole!.id } });
+    await prisma.userPermission.create({ data: { userId: employeeId, permission: 'users.manage', effect: 'DENY' } });
+    expect(await countEffectiveAdmins()).toBe(baseline);
+
+    // Removing the DENY makes them a full admin, so coverage rises by one.
+    await prisma.userPermission.deleteMany({ where: { userId: employeeId } });
+    expect(await countEffectiveAdmins()).toBe(baseline + 1);
+
+    // Excluding them leaves the baseline intact.
+    expect(await countEffectiveAdmins(employeeId)).toBe(baseline);
+
+    // Restore the employee to SUPPORT for the remaining tests.
+    await prisma.user.update({ where: { id: employeeId }, data: { roleId } });
   });
 
   describe('tailor credentials', () => {

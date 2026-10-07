@@ -144,3 +144,27 @@ export async function auditAdmin(
 export function isSuperAdmin(admin: AdminUser): boolean {
   return admin.role === 'ADMIN';
 }
+
+/**
+ * Counts active ADMIN-role users whose *effective* permissions include
+ * `users.manage`. Role grants are not enough on their own: a DENY override can
+ * strip `users.manage` from an individual admin, so coverage is measured on the
+ * resolved permission set. Pass `excludeUserId` to ask "would anyone still be
+ * able to manage employees if this account lost the permission?".
+ */
+export async function countEffectiveAdmins(excludeUserId?: string): Promise<number> {
+  const admins = await prisma.user.findMany({
+    where: {
+      role: { name: 'ADMIN' },
+      isActive: true,
+      ...(excludeUserId ? { id: { not: excludeUserId } } : {}),
+    },
+    select: { id: true, roleId: true, permissionOverrides: { select: { permission: true, effect: true } } },
+  });
+  let count = 0;
+  for (const a of admins) {
+    const effective = await getEffectivePermissions(a.id, a.roleId);
+    if (effective.has('users.manage')) count += 1;
+  }
+  return count;
+}

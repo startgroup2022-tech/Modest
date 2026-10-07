@@ -46,6 +46,12 @@ without changing storefront behaviour.
   `PATCH /api/admin/roles/[id]`.
 - Self-lockout is refused: an admin cannot disable/demote themselves, strip
   their own `users.manage`, or remove their own last admin grant.
+- **Last-effective-admin guard**: `countEffectiveAdmins()` counts active ADMIN
+  users whose *resolved* permissions still include `users.manage`, so a DENY
+  override cannot silently produce an unadministrable system. The permission
+  endpoint refuses to strip the final such admin (`LAST_ADMIN`, 409), and the
+  self-strip check (`SELF_LOCKOUT`, 409) applies to ADMIN too — removing your
+  own ability to manage employees is never allowed, regardless of role.
 - Employee `PATCH` was split: identity fields and permission overrides are
   separate operations; overrides are written atomically in one transaction.
 
@@ -99,7 +105,7 @@ Migration `prisma/migrations/20261007025107_phase2_auth_permissions` (additive):
 | `src/lib/permissions.test.ts` | 14 | resolution, overrides, guards |
 | `src/lib/tailor-auth.test.ts` | 11 | temp password, policy, username, supervisor |
 | `src/lib/session-boundaries.test.ts` | 5 | `isStaff` boundaries, JWT round-trip, tamper |
-| `src/lib/phase2-auth.integration.test.ts` | 8 | real DB: overrides, atomic replace, session bump, full tailor credential lifecycle |
+| `src/lib/phase2-auth.integration.test.ts` | 10 | real DB: overrides, atomic replace, session bump, effective-admin counting, full tailor credential lifecycle |
 
 The DB suite runs only when `RUN_DB_TESTS=1` (it creates and removes its own
 rows). Without it the file is skipped, so CI without a database stays green.
@@ -111,7 +117,7 @@ rows). Without it the file is skipped, so CI without a database stays green.
 | Prisma schema | `npx prisma validate` / `migrate status` | up to date |
 | Typecheck | `npm run typecheck` | PASS (exit 0) |
 | Lint | `npm run lint` | PASS, no warnings |
-| Unit tests | `npm test` | 21 files, 160 passed (with `RUN_DB_TESTS=1`) |
+| Unit tests | `npm test` | 21 files, 162 passed (with `RUN_DB_TESTS=1`) |
 | Production build | `npm run build` | PASS (exit 0) |
 
 ## Deploy notes
