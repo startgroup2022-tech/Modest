@@ -65,9 +65,6 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid measurements' }, { status: 400 });
     }
-    const existing = await prisma.measurement.findFirst({
-      where: { customerId: user.customerId, isDefault: true },
-    });
     const data = {
       name: parsed.data.name || 'My measurements',
       unit: parsed.data.unit,
@@ -81,9 +78,34 @@ export async function POST(req: NextRequest) {
       length: parsed.data.length ?? null,
       notes: parsed.data.notes || null,
     };
-    const measurement = existing
-      ? await prisma.measurement.update({ where: { id: existing.id }, data })
-      : await prisma.measurement.create({ data: { customerId: user.customerId, isDefault: true, ...data } });
+
+    // A profile may be edited by id, but only when it belongs to the caller.
+    // Without an id, the caller's default profile is updated in place unless
+    // the request is an explicit "create" (the Add-profile action), which must
+    // always make a new row.
+    const target = parsed.data.id
+      ? await prisma.measurement.findFirst({ where: { id: parsed.data.id, customerId: user.customerId } })
+      : parsed.data.create
+        ? null
+        : await prisma.measurement.findFirst({ where: { customerId: user.customerId, isDefault: true } });
+    if (parsed.data.id && !target) {
+      return NextResponse.json({ error: 'notFound' }, { status: 404 });
+    }
+
+    const count = await prisma.measurement.count({ where: { customerId: user.customerId } });
+    const makeDefault = parsed.data.isDefault ?? (!target && count === 0);
+    if (makeDefault) {
+      await prisma.measurement.updateMany({ where: { customerId: user.customerId }, data: { isDefault: false } });
+    }
+
+    const measurement = target
+      ? await prisma.measurement.update({
+          where: { id: target.id },
+          data: { ...data, ...(makeDefault ? { isDefault: true } : {}) },
+        })
+      : await prisma.measurement.create({
+          data: { customerId: user.customerId, isDefault: makeDefault || count === 0, ...data },
+        });
     return NextResponse.json({ ok: true, measurement });
   }
 
@@ -144,8 +166,26 @@ export async function DELETE(req: NextRequest) {
   }
   if (!user.customerId) return unauthenticated();
 
-  const id = new URL(req.url).searchParams.get('id');
+  const url = new URL(req.url);
+  const id = url.searchParams.get('id');
+  const kind = url.searchParams.get('kind');
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+  if (kind === 'measurements') {
+    const deleted = await prisma.measurement.deleteMany({ where: { id, customerId: user.customerId } });
+    if (deleted.count === 0) return NextResponse.json({ error: 'notFound' }, { status: 404 });
+    // If the default profile was removed, promote the most recent remaining one.
+    const stillDefault = await prisma.measurement.findFirst({ where: { customerId: user.customerId, isDefault: true } });
+    if (!stillDefault) {
+      const next = await prisma.measurement.findFirst({
+        where: { customerId: user.customerId },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (next) await prisma.measurement.update({ where: { id: next.id }, data: { isDefault: true } });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   await prisma.address.deleteMany({ where: { id, customerId: user.customerId } });
   return NextResponse.json({ ok: true });
 }

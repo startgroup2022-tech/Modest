@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { getAccountStats, getMyOrders, getMyWishlistProducts } from '@/lib/account';
-import { getDictionary } from '@/i18n/dictionaries';
+import { getCustomerMembership } from '@/lib/membership-db';
+import { customerStatusKey } from '@/lib/order-status';
+import { getDictionary, type Dict } from '@/i18n/dictionaries';
 import { type Locale } from '@/i18n/config';
 import { formatMoney } from '@/lib/utils';
 import { Price } from '@/components/ui/Price';
@@ -16,16 +18,50 @@ export default async function AccountOverviewPage({ params }: { params: Promise<
   const user = await getCurrentUser();
   if (!user?.customerId) redirect(`/${locale}/account/sign-in`);
 
-  const [stats, orders, wishlist] = await Promise.all([
+  const [stats, orders, wishlist, membership] = await Promise.all([
     getAccountStats(user.customerId),
     getMyOrders(user.customerId),
     getMyWishlistProducts(user.customerId),
+    getCustomerMembership(user.customerId),
   ]);
 
   const recent = orders.slice(0, 3);
+  const tierName = membership.tier ? (locale === 'ar' ? membership.tier.nameAr : membership.tier.nameEn) : null;
 
   return (
     <div className="space-y-12">
+      {tierName ? (
+        <section className="border border-line p-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <div>
+              <p className="eyebrow mb-2">{dict.account.membership}</p>
+              <p className="text-h3">{tierName}</p>
+            </div>
+            <p className="text-small text-ink-muted">
+              {dict.account.membershipPieces}: <span className="tabular-nums">{membership.qualifyingCount}</span>
+            </p>
+          </div>
+          {membership.nextTier ? (
+            <div className="mt-5">
+              <div className="mb-2 flex justify-between text-caption text-ink-muted">
+                <span>
+                  {dict.account.membershipProgress} — {locale === 'ar' ? membership.nextTier.nameAr : membership.nextTier.nameEn}
+                </span>
+                <span className="tabular-nums">{membership.percent}%</span>
+              </div>
+              <div className="h-px w-full bg-line">
+                <div className="h-px bg-ink" style={{ width: `${membership.percent}%` }} />
+              </div>
+              {membership.toNext != null ? (
+                <p className="mt-2 text-caption text-ink-faint">
+                  {membership.toNext} {dict.account.membershipPieces}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="grid gap-4 sm:grid-cols-3">
         <div className="border border-line p-6">
           <p className="eyebrow mb-2">{dict.account.orders}</p>
@@ -70,7 +106,9 @@ export default async function AccountOverviewPage({ params }: { params: Promise<
                 </div>
                 <div className="text-end">
                   <Price amountBhd={Number(o.totalBhd)} locale={locale} />
-                  <p className="mt-1 text-caption uppercase tracking-[0.1em] text-ink-faint">{o.status}</p>
+                  <p className="mt-1 text-caption uppercase tracking-[0.1em] text-ink-faint">
+                    {dict.order[customerStatusKey(o.status) as keyof Dict['order']]}
+                  </p>
                 </div>
               </li>
             ))}

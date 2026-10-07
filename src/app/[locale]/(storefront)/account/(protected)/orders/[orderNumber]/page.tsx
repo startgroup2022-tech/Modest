@@ -7,6 +7,16 @@ import { getDictionary } from '@/i18n/dictionaries';
 import { type Locale } from '@/i18n/config';
 import { Price } from '@/components/ui/Price';
 import { OrderTimeline } from '@/components/account/OrderTimeline';
+import { customerPaymentStatusKey } from '@/lib/order-status';
+import type { Dict } from '@/i18n/dictionaries';
+
+/** Localised label for a payment method using the checkout dictionary keys. */
+const PAYMENT_METHOD_KEY: Record<string, keyof Dict['checkout']> = {
+  COD: 'cod',
+  BANK_TRANSFER: 'bankTransfer',
+  BENEFIT: 'benefit',
+  TAPP: 'tapp',
+};
 
 export default async function OrderDetailPage({
   params,
@@ -112,14 +122,45 @@ export default async function OrderDetailPage({
             <dl className="space-y-2 text-small">
               <div className="flex justify-between">
                 <dt className="text-ink-muted">{dict.order.paymentMethod}</dt>
-                <dd>{payment?.method.replace('_', ' ') ?? '—'}</dd>
+                <dd>{payment ? dict.checkout[PAYMENT_METHOD_KEY[payment.method] ?? 'paymentMethod'] : '—'}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-ink-muted">{dict.order.paymentStatus}</dt>
-                <dd className="uppercase tracking-[0.08em]">{payment?.status ?? 'PENDING'}</dd>
+                <dd>
+                  {payment
+                    ? dict.order[customerPaymentStatusKey(payment.status) as keyof Dict['order']]
+                    : dict.order.paymentPending}
+                </dd>
               </div>
+              {payment?.providerRef ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-ink-muted">{dict.order.paymentReference}</dt>
+                  <dd className="truncate text-end">{payment.providerRef}</dd>
+                </div>
+              ) : null}
             </dl>
+            {payment?.paymentUrl && payment.status !== 'PAID' ? (
+              <a href={payment.paymentUrl} target="_blank" rel="noopener noreferrer" className="btn-outline mt-4 w-full">
+                {dict.checkout.payNow}
+              </a>
+            ) : null}
           </section>
+
+          {order.refunds.length > 0 ? (
+            <section>
+              <h3 className="eyebrow mb-4 border-b border-line pb-3">{dict.order.amountRefunded}</h3>
+              <ul className="space-y-2 text-small">
+                {order.refunds.map((r) => (
+                  <li key={r.id} className="flex justify-between gap-4">
+                    <span className="text-ink-muted">{r.createdAt.toISOString().slice(0, 10)}</span>
+                    <span className="tabular-nums">
+                      {Number(r.amountBhd).toFixed(3)} {order.presentmentCode}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           <section>
             <h3 className="eyebrow mb-4 border-b border-line pb-3">{dict.order.shippingAddress}</h3>

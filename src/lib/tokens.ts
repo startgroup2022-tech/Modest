@@ -14,3 +14,15 @@ export function generateToken(bytes = 24): string {
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
+
+/**
+ * A stable, non-reversible anchor for a guest's coupon identity. The raw email
+ * is never stored on a redemption row, so guests cannot be enumerated from the
+ * coupon tables. The value is salted with `AUTH_SECRET` so it is not a plain
+ * rainbow-table lookup of common addresses.
+ */
+export function hashGuestEmail(email: string): string {
+  const normalized = email.trim().toLowerCase();
+  const salt = process.env.AUTH_SECRET ?? 'attention';
+  return createHash('sha256').update(`${salt}:${normalized}`).digest('hex');
+}

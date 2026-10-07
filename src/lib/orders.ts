@@ -4,6 +4,8 @@ import { computeTotals, type CouponLike } from './money';
 import { roundBhd } from './utils';
 import { nextSequence, monthlyScope } from './sequences';
 import { getPaymentProvider, type PaymentInitResult } from './payments';
+import { notifyOrderStatus } from './notifications';
+import { recomputeCustomerMembership } from './membership-db';
 import { peekCartId } from './cart';
 import { isMeasurementSnapshot } from './order-measurements';
 import { STOREFRONT_PRODUCT_STATUSES } from './catalog';
@@ -172,6 +174,8 @@ export interface CreateOrderInput {
   coupon: CouponLike | null;
   idempotencyKey?: string | null;
   baseUrl: string;
+  /** Guest identity anchor for coupon per-customer limits (hashed email). */
+  guestEmailHash?: string | null;
 }
 
 export interface CreatedOrder {
@@ -333,6 +337,17 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
         where: { id: couponId },
         data: { usedCount: { increment: 1 } },
       });
+      // Append-only redemption row: the per-customer limit and refund reverts
+      // both read from this, and history is never rewritten.
+      await tx.couponRedemption.create({
+        data: {
+          couponId,
+          customerId: input.customerId,
+          orderId: created.id,
+          guestEmailHash: input.customerId ? null : (input.guestEmailHash ?? null),
+          amountBhd: totals.discountBhd,
+        },
+      });
     }
 
     return created;
@@ -367,6 +382,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
       currencyCode: input.currency.code,
       amountPresentment: presentmentTotal,
       providerRef: init.providerRef ?? null,
+      // Persist the provider-hosted payment page so the customer can resume a
+      // redirect they abandoned (the order detail page surfaces a "Pay now"
+      // link while the payment is unsettled).
+      paymentUrl: init.redirectUrl ?? null,
       paidAt: init.status === 'PAID' ? new Date() : null,
       failedReason: init.status === 'FAILED' ? 'Provider initialisation failed' : null,
     },
@@ -462,15 +481,17 @@ export async function applyPaymentResult(params: {
   if (!signatureVerified) {
     throw new CheckoutError('Unverified payment callback rejected', 'PAYMENT_FAILED');
   }
-  return prisma.$transaction(async (tx) => {
+
+  const outcome = await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.findFirst({
       where: { orderId },
       orderBy: { createdAt: 'desc' },
+      include: { order: { select: { customerId: true, orderNumber: true } } },
     });
     if (!payment) throw new CheckoutError('Payment not found', 'PAYMENT_FAILED');
 
     if (status === 'PAID' && payment.status === 'PAID') {
-      return payment; // idempotent — already applied
+      return { payment, justPaid: false }; // idempotent — already applied
     }
 
     // A settled payment can never be downgraded by a later or replayed callback
@@ -478,7 +499,7 @@ export async function applyPaymentResult(params: {
     // only legal move away from a settled state and are handled elsewhere.
     const settled = payment.status === 'PAID' || payment.status === 'REFUNDED' || payment.status === 'PARTIALLY_REFUNDED';
     if (settled && status !== 'PAID' && status !== 'REFUNDED') {
-      return payment;
+      return { payment, justPaid: false };
     }
 
     const updated = await tx.payment.update({
@@ -492,7 +513,9 @@ export async function applyPaymentResult(params: {
       },
     });
 
+    let justPaid = false;
     if (status === 'PAID') {
+      justPaid = true;
       await tx.order.update({ where: { id: orderId }, data: { status: 'CONFIRMED' } });
       await tx.orderEvent.create({
         data: {
@@ -512,6 +535,27 @@ export async function applyPaymentResult(params: {
         },
       });
     }
-    return updated;
+    return {
+      payment: updated,
+      justPaid,
+      customerId: payment.order.customerId,
+      orderNumber: payment.order.orderNumber,
+    };
   });
+
+  // Mirror the admin payment path: a provider-confirmed payment must notify the
+  // customer and refresh their derived membership. Runs after commit so the
+  // recompute reads the settled state.
+  if (outcome.justPaid && outcome.orderNumber) {
+    await notifyOrderStatus(prisma, {
+      customerId: outcome.customerId,
+      orderNumber: outcome.orderNumber,
+      status: 'CONFIRMED',
+    });
+    if (outcome.customerId) {
+      await recomputeCustomerMembership(outcome.customerId);
+    }
+  }
+
+  return outcome.payment;
 }

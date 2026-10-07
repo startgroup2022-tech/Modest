@@ -835,6 +835,19 @@ async function main() {
     await prisma.coupon.upsert({ where: { code: c.code }, update: c, create: c });
   }
 
+  // ── Membership tiers ───────────────────────────────────
+  // Tiers are thresholds on the count of qualifying paid, non-refunded pieces.
+  // The count itself is derived (see src/lib/membership-db.ts); only the
+  // thresholds are stored, so an owner can retune them without touching orders.
+  const membershipTiers = [
+    { code: 'SIGNATURE', nameEn: 'Signature', nameAr: 'سيجنتشر', minQualifying: 0, sortOrder: 1 },
+    { code: 'GOLD', nameEn: 'Gold', nameAr: 'ذهبي', minQualifying: 5, sortOrder: 2 },
+    { code: 'PLATINUM', nameEn: 'Platinum', nameAr: 'بلاتيني', minQualifying: 12, sortOrder: 3 },
+  ];
+  for (const t of membershipTiers) {
+    await prisma.membershipTier.upsert({ where: { code: t.code }, update: t, create: t });
+  }
+
   // ── Social links ───────────────────────────────────────
   await prisma.socialLink.deleteMany({});
   await prisma.socialLink.createMany({
@@ -916,6 +929,12 @@ async function main() {
     {
       key: 'checkout',
       value: { allowGuestCheckout: true, requirePhone: true, enableOrderNotes: true, enableCoupons: true, requireTerms: true },
+    },
+    {
+      // Products excluded from membership qualification (accessories, gift
+      // cards, etc.). Empty means every paid piece qualifies.
+      key: 'membership',
+      value: { excludedProductIds: [] },
     },
     {
       key: 'tapp_config',

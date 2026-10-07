@@ -144,6 +144,30 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
 - Admin APIs are mutation-only. Admin pages read data through server components,
   so `GET /api/admin/...` returning 405/404 is expected.
 
+## Order lifecycle, payments & membership (Phase 4)
+- A payment reaching `PAID` is the single event that (a) confirms a `PENDING`
+  order, (b) emits a customer notification, and (c) refreshes the derived
+  membership. This must run **after** the transaction commits: the membership
+  recompute reads through the global Prisma client, so calling it inside `tx`
+  reads pre-commit state and under-counts. Both admin (`updatePayment`) and
+  webhook (`applyPaymentResult`) paths follow this pattern.
+- `Notification.href` is stored **locale-less** (`/account/orders/{number}`).
+  The notifications page prefixes the active locale so Arabic customers are not
+  sent to English routes. Never store a locale-prefixed href.
+- `transitionOrder` refuses to enter `IN_PRODUCTION` unless a payment is settled
+  (`PAID`/`PARTIALLY_REFUNDED`/`REFUNDED`) — the gate lives in the domain layer,
+  not the UI.
+- Membership tiers are **seeded** (`SIGNATURE`/`GOLD`/`PLATINUM`) and their
+  thresholds live only in `MembershipTier`; the qualifying count is always
+  derived from settled, non-refunded order pieces (`src/lib/membership-db.ts`).
+  A `membership` site setting can exclude products from qualification.
+- Coupon membership targeting (`Coupon.minQualifyingPieces`) is exposed in the
+  admin coupon form and enforced in `evaluateCoupon` against the
+  server-computed count.
+- Measurement profiles are multi-row per customer: `measurementSchema` accepts
+  `id` (edit) and `create: true` (explicit add). Without `create`, a POST with no
+  id updates the default profile in place.
+
 ## Deployment
 - cPanel target: see `DEPLOYMENT.md`. Entry point is `server.js` (Passenger).
 - Baseline Prisma migration is committed at `prisma/migrations/0_init`.

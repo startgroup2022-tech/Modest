@@ -73,7 +73,7 @@ export type Dict = {
     string
   >;
   cart: Record<
-    | 'title' | 'empty' | 'emptyBody' | 'startShopping' | 'subtotal' | 'discount' | 'shipping' | 'total' | 'checkout' | 'remove' | 'quantity' | 'continueShopping' | 'coupon' | 'couponPlaceholder' | 'apply' | 'couponApplied' | 'couponInvalid' | 'free' | 'estimatedDelivery' | 'updateQty' | 'added' | 'couponMinOrder' | 'deliveryMethod' | 'orderSummary' | 'taxIncluded' | 'checkoutNote',
+    | 'title' | 'empty' | 'emptyBody' | 'startShopping' | 'subtotal' | 'discount' | 'shipping' | 'total' | 'checkout' | 'remove' | 'quantity' | 'continueShopping' | 'coupon' | 'couponPlaceholder' | 'apply' | 'couponApplied' | 'couponInvalid' | 'free' | 'estimatedDelivery' | 'updateQty' | 'added' | 'couponMinOrder' | 'deliveryMethod' | 'orderSummary' | 'taxIncluded' | 'checkoutNote' | 'couponUsed' | 'couponMembership',
     string
   >;
   checkout: Record<
@@ -82,11 +82,12 @@ export type Dict = {
   >;
   account: Record<
     | 'title' | 'overview' | 'orders' | 'wishlist' | 'addresses' | 'measurements' | 'profile' | 'notifications' | 'settings' | 'signIn' | 'signUp' | 'email' | 'password' | 'confirmPassword' | 'firstName' | 'lastName' | 'createAccount' | 'noAccount' | 'haveAccount' | 'signingIn' | 'creating' | 'welcome' | 'signedInAs' | 'noOrders' | 'noOrdersBody' | 'noWishlist' | 'noWishlistBody' | 'noNotifications' | 'noNotificationsBody' | 'noAddresses' | 'noAddressesBody' | 'addAddress' | 'save' | 'cancel' | 'edit' | 'delete' | 'default' | 'setDefault' | 'saved' | 'measurementsBody' | 'saveMeasurements' | 'invalidCredentials' | 'emailTaken' | 'passwordMismatch' | 'passwordTooShort' | 'orderStatus' | 'orderTotal' | 'orderDate' | 'orderItems' | 'tracking' | 'moveToCart' | 'logout'
-    | 'signInBody' | 'signUpBody' | 'emailPlaceholder' | 'passwordPlaceholder' | 'firstNamePlaceholder' | 'lastNamePlaceholder' | 'phonePlaceholder' | 'backToOrders' | 'orderDetails' | 'shippingTo' | 'itemsCount' | 'addressBody' | 'addressLabel' | 'profileBody' | 'preferredLocale' | 'settingsBody' | 'notificationsBody' | 'markAllRead' | 'totalSpent' | 'accountSince' | 'saveProfile' | 'saving' | 'wishlistBody' | 'viewDetails' | 'changePassword' | 'changePasswordBody' | 'currentPassword' | 'newPassword' | 'updatePassword' | 'passwordChanged' | 'incorrectPassword' | 'passwordSameAsCurrent',
+    | 'signInBody' | 'signUpBody' | 'emailPlaceholder' | 'passwordPlaceholder' | 'firstNamePlaceholder' | 'lastNamePlaceholder' | 'phonePlaceholder' | 'backToOrders' | 'orderDetails' | 'shippingTo' | 'itemsCount' | 'addressBody' | 'addressLabel' | 'profileBody' | 'preferredLocale' | 'settingsBody' | 'notificationsBody' | 'markAllRead' | 'totalSpent' | 'accountSince' | 'saveProfile' | 'saving' | 'wishlistBody' | 'viewDetails' | 'changePassword' | 'changePasswordBody' | 'currentPassword' | 'newPassword' | 'updatePassword' | 'passwordChanged' | 'incorrectPassword' | 'passwordSameAsCurrent' | 'measurementName' | 'measurementNamePlaceholder' | 'addMeasurement' | 'noMeasurements' | 'noMeasurementsBody' | 'measurementsSaved' | 'membership' | 'membershipTier' | 'membershipPieces' | 'membershipProgress' | 'memberSince',
     string
   >;
   order: Record<
-    | 'placed' | 'confirmed' | 'preparing' | 'inProduction' | 'qualityCheck' | 'ready' | 'shipped' | 'delivered' | 'cancelled' | 'refunded' | 'timeline' | 'paymentMethod' | 'paymentStatus' | 'shippingAddress' | 'items' | 'thankYou' | 'thankYouBody',
+    | 'placed' | 'confirmed' | 'preparing' | 'inProduction' | 'qualityCheck' | 'ready' | 'shipped' | 'delivered' | 'cancelled' | 'refunded' | 'timeline' | 'paymentMethod' | 'paymentStatus' | 'shippingAddress' | 'items' | 'thankYou' | 'thankYouBody'
+    | 'refundRequested' | 'paymentInitiated' | 'paymentPending' | 'paymentPaid' | 'paymentFailed' | 'paymentCancelled' | 'paymentRefunded' | 'paymentPartiallyRefunded' | 'refundAmount' | 'amountRefunded' | 'paymentReference',
     string
   >;
   common: Record<
@@ -256,6 +257,8 @@ const en: Dict = {
     updateQty: 'Update quantity',
     added: 'Added to your bag',
     couponMinOrder: 'This code requires a higher order value',
+    couponUsed: 'You have already used this promo code',
+    couponMembership: 'This promo code is not available for your account',
     deliveryMethod: 'Delivery method',
     orderSummary: 'Order Summary',
     taxIncluded: 'VAT included',
@@ -393,6 +396,17 @@ const en: Dict = {
     passwordChanged: 'Your password has been updated.',
     incorrectPassword: 'Your current password is incorrect',
     passwordSameAsCurrent: 'Choose a password different from your current one',
+    measurementName: 'Profile name',
+    measurementNamePlaceholder: 'e.g. My measurements',
+    addMeasurement: 'Add profile',
+    noMeasurements: 'No measurements saved',
+    noMeasurementsBody: 'Save your measurements once and they will be ready for every made-to-order piece.',
+    measurementsSaved: 'Measurements saved',
+    membership: 'Membership',
+    membershipTier: 'Tier',
+    membershipPieces: 'Qualifying pieces',
+    membershipProgress: 'Progress to next tier',
+    memberSince: 'Member since',
   },
   order: {
     placed: 'Order Placed',
@@ -405,6 +419,17 @@ const en: Dict = {
     delivered: 'Delivered',
     cancelled: 'Cancelled',
     refunded: 'Refunded',
+    refundRequested: 'Refund Requested',
+    paymentInitiated: 'Payment Initiated',
+    paymentPending: 'Awaiting Payment',
+    paymentPaid: 'Paid',
+    paymentFailed: 'Payment Failed',
+    paymentCancelled: 'Payment Cancelled',
+    paymentRefunded: 'Refunded',
+    paymentPartiallyRefunded: 'Partially Refunded',
+    refundAmount: 'Refunded amount',
+    amountRefunded: 'Amount refunded',
+    paymentReference: 'Reference',
     timeline: 'Order Timeline',
     paymentMethod: 'Payment Method',
     paymentStatus: 'Payment Status',
@@ -686,6 +711,8 @@ const ar: Dict = {
     updateQty: 'تحديث الكمية',
     added: 'تمت الإضافة إلى حقيبتك',
     couponMinOrder: 'يتطلب هذا الكود قيمة طلب أعلى',
+    couponUsed: 'لقد استخدمتِ كود الخصم هذا من قبل',
+    couponMembership: 'كود الخصم هذا غير متاح لحسابك',
     deliveryMethod: 'طريقة التوصيل',
     orderSummary: 'ملخص الطلب',
     taxIncluded: 'شامل الضريبة',
@@ -823,6 +850,17 @@ const ar: Dict = {
     passwordChanged: 'تم تحديث كلمة المرور بنجاح.',
     incorrectPassword: 'كلمة المرور الحالية غير صحيحة',
     passwordSameAsCurrent: 'اختاري كلمة مرور مختلفة عن الحالية',
+    measurementName: 'اسم الملف',
+    measurementNamePlaceholder: 'مثال: قياساتي',
+    addMeasurement: 'إضافة ملف قياسات',
+    noMeasurements: 'لا توجد قياسات محفوظة',
+    noMeasurementsBody: 'احفظي قياساتك مرة واحدة لتكون جاهزة لكل قطعة حسب الطلب.',
+    measurementsSaved: 'تم حفظ القياسات',
+    membership: 'العضوية',
+    membershipTier: 'المستوى',
+    membershipPieces: 'القطع المؤهلة',
+    membershipProgress: 'التقدم نحو المستوى التالي',
+    memberSince: 'عضوة منذ',
   },
   order: {
     placed: 'تم الطلب',
@@ -835,6 +873,17 @@ const ar: Dict = {
     delivered: 'تم التسليم',
     cancelled: 'ملغى',
     refunded: 'مسترجع',
+    refundRequested: 'تم طلب الاسترداد',
+    paymentInitiated: 'بدأ الدفع',
+    paymentPending: 'بانتظار الدفع',
+    paymentPaid: 'مدفوع',
+    paymentFailed: 'فشل الدفع',
+    paymentCancelled: 'أُلغي الدفع',
+    paymentRefunded: 'مسترجع',
+    paymentPartiallyRefunded: 'مسترجع جزئياً',
+    refundAmount: 'المبلغ المسترجع',
+    amountRefunded: 'المبلغ المسترجع',
+    paymentReference: 'المرجع',
     timeline: 'مسار الطلب',
     paymentMethod: 'طريقة الدفع',
     paymentStatus: 'حالة الدفع',

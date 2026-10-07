@@ -71,7 +71,7 @@ export function CheckoutForm({
   const [shippingCode, setShippingCode] = useState(shipping[0]?.code ?? '');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(methods[0]?.method ?? 'COD');
   const [coupon, setCoupon] = useState('');
-  const [couponState, setCouponState] = useState<{ status: 'idle' | 'applied' | 'invalid' | 'min'; discountBhd: number; freeShipping: boolean }>(
+  const [couponState, setCouponState] = useState<{ status: 'idle' | 'applied' | 'invalid' | 'min'; discountBhd: number; freeShipping: boolean; reason?: 'couponMinOrder' | 'couponUsed' | 'couponMembership' | 'couponInvalid' }>(
     { status: 'idle', discountBhd: 0, freeShipping: false },
   );
   const [acceptsTerms, setAcceptsTerms] = useState(false);
@@ -108,13 +108,26 @@ export function CheckoutForm({
       const res = await fetch('/api/coupon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: coupon }),
+        body: JSON.stringify({ code: coupon, email: form.email || undefined }),
       });
       const data = (await res.json()) as { ok: boolean; error?: string; discountBhd?: number; freeShipping?: boolean };
       if (data.ok) {
         setCouponState({ status: 'applied', discountBhd: data.discountBhd ?? 0, freeShipping: Boolean(data.freeShipping) });
       } else {
-        setCouponState({ status: data.error === 'couponMinOrder' ? 'min' : 'invalid', discountBhd: 0, freeShipping: false });
+        const reason =
+          data.error === 'couponMinOrder'
+            ? 'couponMinOrder'
+            : data.error === 'couponUsed'
+              ? 'couponUsed'
+              : data.error === 'couponMembership'
+                ? 'couponMembership'
+                : 'couponInvalid';
+        setCouponState({
+          status: reason === 'couponMinOrder' ? 'min' : 'invalid',
+          discountBhd: 0,
+          freeShipping: false,
+          reason,
+        });
       }
     } catch {
       setCouponState({ status: 'invalid', discountBhd: 0, freeShipping: false });
@@ -407,7 +420,11 @@ export function CheckoutForm({
                   ? dict.cart.couponApplied
                   : couponState.status === 'min'
                     ? dict.cart.couponMinOrder
-                    : dict.cart.couponInvalid}
+                    : couponState.reason === 'couponUsed'
+                      ? dict.cart.couponUsed
+                      : couponState.reason === 'couponMembership'
+                        ? dict.cart.couponMembership
+                        : dict.cart.couponInvalid}
               </p>
             ) : null}
           </div>

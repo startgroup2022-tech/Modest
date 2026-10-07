@@ -35,6 +35,7 @@ export default async function AccountNotificationsPage({ params }: { params: Pro
         {notifications.map((n) => {
           const title = locale === 'ar' ? n.titleAr : n.titleEn;
           const body = locale === 'ar' ? n.bodyAr : n.bodyEn;
+          const href = n.href?.startsWith('/') ? `/${locale}${n.href}` : n.href;
           const content = (
             <div className={n.readAt ? 'opacity-70' : ''}>
               <p className="text-body">{title}</p>
@@ -44,8 +45,8 @@ export default async function AccountNotificationsPage({ params }: { params: Pro
           );
           return (
             <li key={n.id} className="py-4">
-              {n.href ? (
-                <Link href={n.href} className="block transition-opacity hover:opacity-80">
+              {href ? (
+                <Link href={href} className="block transition-opacity hover:opacity-80">
                   {content}
                 </Link>
               ) : (

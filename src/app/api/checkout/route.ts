@@ -6,13 +6,14 @@ import { getSelectedCurrency } from '@/lib/currency';
 import { checkoutSchema } from '@/lib/validation';
 import { createOrder, resolveCartLines, CheckoutError } from '@/lib/orders';
 import { computeTotals } from '@/lib/money';
+import { findCouponByCode, buildCouponLines, evaluateCoupon } from '@/lib/coupons';
+import { getQualifyingCount } from '@/lib/membership-db';
+import { hashGuestEmail } from '@/lib/tokens';
 import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
 import type { CouponLike } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
-
-const VALID_COUPON_INCLUDE = { id: true, code: true, discountType: true, valueBhd: true, minOrderBhd: true, maxDiscountBhd: true, usageLimit: true, usedCount: true, startsAt: true, expiresAt: true, isActive: true } as const;
 
 export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
   }
 
   const user = await getCurrentUser();
+  const currency = await getSelectedCurrency();
 
   // Replay a previous submission before touching the cart. A double-tap or
   // network retry clears the bag on the first request, so without this the
@@ -62,28 +64,36 @@ export async function POST(req: NextRequest) {
   }
 
   // Coupon is validated server-side against the database, never trusted from the client.
+  // The evaluator applies scope, window, usage, per-customer and membership rules.
   let coupon: (CouponLike & { id: string }) | null = null;
   const couponCode = parsed.data.couponCode?.trim().toUpperCase();
   if (couponCode) {
-    const now = new Date();
-    const row = await prisma.coupon.findUnique({ where: { code: couponCode }, select: VALID_COUPON_INCLUDE });
-    const valid =
-      row &&
-      row.isActive &&
-      (!row.startsAt || row.startsAt <= now) &&
-      (!row.expiresAt || row.expiresAt >= now) &&
-      (row.usageLimit == null || row.usedCount < row.usageLimit);
-    if (valid && row) {
-      coupon = {
-        id: row.id,
-        discountType: row.discountType,
-        valueBhd: Number(row.valueBhd),
-        minOrderBhd: row.minOrderBhd != null ? Number(row.minOrderBhd) : null,
-        maxDiscountBhd: row.maxDiscountBhd != null ? Number(row.maxDiscountBhd) : null,
-      };
-    } else {
+    const row = await findCouponByCode(couponCode);
+    if (!row) {
       return NextResponse.json({ error: 'This promo code is not valid', field: 'couponCode' }, { status: 400 });
     }
+    const couponLines = await buildCouponLines(
+      cart.items.map((i) => ({ productId: i.productId, unitPriceBhd: i.unitPriceBhd, quantity: i.quantity })),
+    );
+    const membershipCount = user?.customerId ? await getQualifyingCount(user.customerId) : null;
+    const evaluation = await evaluateCoupon(row, couponLines, {
+      customerId: user?.customerId ?? null,
+      guestEmailHash: user?.customerId ? null : hashGuestEmail(parsed.data.email),
+      membershipCount,
+      currencyCode: currency.code,
+    });
+    if (!evaluation.ok || !evaluation.coupon) {
+      const message =
+        evaluation.reason === 'MIN_ORDER'
+          ? 'This promo code needs a larger order'
+          : evaluation.reason === 'PER_CUSTOMER_LIMIT'
+            ? 'You have already used this promo code'
+            : evaluation.reason === 'MIN_MEMBERSHIP'
+              ? 'This promo code is not available for your account'
+              : 'This promo code is not valid';
+      return NextResponse.json({ error: message, field: 'couponCode' }, { status: 400 });
+    }
+    coupon = evaluation.coupon;
   }
 
   // Shipping is chosen server-side from the DB by code; the price is never client-supplied.
@@ -97,8 +107,6 @@ export async function POST(req: NextRequest) {
     const fallback = await prisma.shippingMethod.findFirst({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } });
     shippingBhd = fallback ? Number(fallback.priceBhd) : 0;
   }
-
-  const currency = await getSelectedCurrency();
 
   try {
     const lines = await resolveCartLines(
@@ -131,6 +139,7 @@ export async function POST(req: NextRequest) {
       coupon,
       idempotencyKey,
       baseUrl,
+      guestEmailHash: user?.customerId ? null : hashGuestEmail(parsed.data.email),
     });
 
     await clearCart();

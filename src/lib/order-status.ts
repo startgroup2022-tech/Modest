@@ -79,3 +79,41 @@ const MESSAGES: Record<string, { en: string; ar: string }> = {
 export function statusMessage(status: OrderStatus): { en: string; ar: string } {
   return MESSAGES[status] ?? { en: status, ar: status };
 }
+
+/**
+ * Stable dictionary keys for the customer-facing order status label. Kept here
+ * (rather than duplicated in each page) so a new status can never render as a
+ * raw enum in one place and a translated label in another.
+ */
+export const ORDER_STATUS_KEY: Record<OrderStatus, string> = {
+  PENDING: 'placed',
+  CONFIRMED: 'confirmed',
+  PREPARING: 'preparing',
+  IN_PRODUCTION: 'inProduction',
+  QUALITY_CHECK: 'qualityCheck',
+  READY: 'ready',
+  SHIPPED: 'shipped',
+  DELIVERED: 'delivered',
+  CANCELLED: 'cancelled',
+  REFUND_REQUESTED: 'refundRequested',
+  REFUNDED: 'refunded',
+};
+
+export function customerStatusKey(status: OrderStatus): string {
+  return ORDER_STATUS_KEY[status] ?? 'placed';
+}
+
+/** Stable dictionary keys for the customer-facing payment status label. */
+export const PAYMENT_STATUS_KEY: Record<string, string> = {
+  INITIATED: 'paymentInitiated',
+  PENDING: 'paymentPending',
+  PAID: 'paymentPaid',
+  FAILED: 'paymentFailed',
+  CANCELLED: 'paymentCancelled',
+  REFUNDED: 'paymentRefunded',
+  PARTIALLY_REFUNDED: 'paymentPartiallyRefunded',
+};
+
+export function customerPaymentStatusKey(status: string): string {
+  return PAYMENT_STATUS_KEY[status] ?? 'paymentPending';
+}

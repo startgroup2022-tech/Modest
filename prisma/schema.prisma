@@ -105,6 +105,7 @@ model User {
   settlementsApproved    TailorSettlement[]  @relation("SettlementApprover")
   refundsCreated         Refund[]            @relation("RefundCreator")
   paymentsVerified       Payment[]           @relation("PaymentVerifier")
+  paymentLinksSent       Payment[]           @relation("PaymentLinkSender")
   inventoryMovements     InventoryMovement[] @relation("InventoryActor")
   qcRecords              QcRecord[]          @relation("QcChecker")
   ordersCreated          Order[]             @relation("OrderCreator")
@@ -137,25 +138,26 @@ model AuditLog {
 // ───────────────────────────────────────────────────────────
 
 model Customer {
-  id               String          @id @default(cuid())
-  userId           String          @unique
-  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String             @id @default(cuid())
+  userId           String             @unique
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   phone            String?
-  defaultLocale    String          @default("en")
-  acceptsMarketing Boolean         @default(false)
+  defaultLocale    String             @default("en")
+  acceptsMarketing Boolean            @default(false)
   // Optional cached membership pointer. The authoritative tier is *derived*
   // from qualifying paid, non-refunded items; this column only caches the last
   // computed tier so lists do not recompute on every render.
   membershipTierId String?
-  membershipTier   MembershipTier? @relation(fields: [membershipTierId], references: [id], onDelete: SetNull)
+  membershipTier   MembershipTier?    @relation(fields: [membershipTierId], references: [id], onDelete: SetNull)
   addresses        Address[]
   measurements     Measurement[]
   orders           Order[]
   wishlist         WishlistItem[]
   cart             Cart?
   notifications    Notification[]
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  redemptions      CouponRedemption[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   @@index([membershipTierId])
 }
@@ -570,28 +572,59 @@ enum DiscountType {
 }
 
 model Coupon {
-  id               String       @id @default(cuid())
-  code             String       @unique
-  descriptionEn    String?
-  descriptionAr    String?
-  discountType     DiscountType
-  valueBhd         Decimal      @default(0) @db.Decimal(10, 3)
-  minOrderBhd      Decimal?     @db.Decimal(10, 3)
-  maxDiscountBhd   Decimal?     @db.Decimal(10, 3)
-  usageLimit       Int?
-  usedCount        Int          @default(0)
-  perCustomerLimit Int?
+  id                  String             @id @default(cuid())
+  code                String             @unique
+  descriptionEn       String?
+  descriptionAr       String?
+  discountType        DiscountType
+  valueBhd            Decimal            @default(0) @db.Decimal(10, 3)
+  minOrderBhd         Decimal?           @db.Decimal(10, 3)
+  maxDiscountBhd      Decimal?           @db.Decimal(10, 3)
+  usageLimit          Int?
+  usedCount           Int                @default(0)
+  perCustomerLimit    Int?
   // Restrictions — empty arrays mean "no restriction"
-  categoryIds      Json?
-  collectionIds    Json?
-  productIds       Json?
-  currencyCodes    Json?
-  startsAt         DateTime?
-  expiresAt        DateTime?
-  isActive         Boolean      @default(true)
-  orders           Order[]
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  categoryIds         Json?
+  collectionIds       Json?
+  productIds          Json?
+  currencyCodes       Json?
+  startsAt            DateTime?
+  expiresAt           DateTime?
+  isActive            Boolean            @default(true)
+  // Membership targeting: when set, only a customer whose *server-computed*
+  // qualifying paid-piece count is at least this value may use the code.
+  minQualifyingPieces Int?
+  orders              Order[]
+  redemptions         CouponRedemption[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+}
+
+// One row per coupon use, kept for audit and per-customer limits. The row is
+// never deleted on refund: a refund stamps `revertedAt` so history stays
+// traceable while the redemption stops counting toward the customer's active
+// eligibility.
+model CouponRedemption {
+  id             String    @id @default(cuid())
+  couponId       String
+  coupon         Coupon    @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  customerId     String?
+  customer       Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderId        String?
+  order          Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  // Guest identity anchor when no customer account exists: a hash of the email,
+  // never the raw address, so a guest cannot be trivially enumerated.
+  guestEmailHash String?
+  amountBhd      Decimal   @default(0) @db.Decimal(12, 3)
+  // Null while the redemption is active; stamped when the qualifying order is
+  // fully refunded so the code can be reused and per-customer limits relax.
+  revertedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([couponId])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([guestEmailHash])
 }
 
 model Promotion {
@@ -659,10 +692,10 @@ enum PaymentStatus {
 }
 
 model Order {
-  id                 String           @id @default(cuid())
-  orderNumber        String           @unique
+  id                 String             @id @default(cuid())
+  orderNumber        String             @unique
   customerId         String?
-  customer           Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customer           Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
   email              String
   phone              String
   shippingName       String
@@ -672,32 +705,32 @@ model Order {
   shippingAddress    String
   shippingBuilding   String?
   shippingUnit       String?
-  notes              String?          @db.Text
-  status             OrderStatus      @default(PENDING)
+  notes              String?            @db.Text
+  status             OrderStatus        @default(PENDING)
   // Accounting currency snapshot (BHD)
-  subtotalBhd        Decimal          @db.Decimal(12, 3)
-  discountBhd        Decimal          @default(0) @db.Decimal(12, 3)
-  shippingBhd        Decimal          @default(0) @db.Decimal(12, 3)
-  totalBhd           Decimal          @db.Decimal(12, 3)
+  subtotalBhd        Decimal            @db.Decimal(12, 3)
+  discountBhd        Decimal            @default(0) @db.Decimal(12, 3)
+  shippingBhd        Decimal            @default(0) @db.Decimal(12, 3)
+  totalBhd           Decimal            @db.Decimal(12, 3)
   // Presentment currency snapshot — preserved forever
-  presentmentCode    String           @default("BHD")
-  presentmentRate    Decimal          @default(1) @db.Decimal(18, 8)
-  presentmentTotal   Decimal          @default(0) @db.Decimal(12, 3)
-  rateCapturedAt     DateTime         @default(now())
+  presentmentCode    String             @default("BHD")
+  presentmentRate    Decimal            @default(1) @db.Decimal(18, 8)
+  presentmentTotal   Decimal            @default(0) @db.Decimal(12, 3)
+  rateCapturedAt     DateTime           @default(now())
   couponId           String?
-  coupon             Coupon?          @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  coupon             Coupon?            @relation(fields: [couponId], references: [id], onDelete: SetNull)
   couponCode         String?
-  idempotencyKey     String?          @unique
-  channel            OrderChannel     @default(ONLINE)
-  priority           Int              @default(0)
-  internalNotes      String?          @db.Text
+  idempotencyKey     String?            @unique
+  channel            OrderChannel       @default(ONLINE)
+  priority           Int                @default(0)
+  internalNotes      String?            @db.Text
   createdById        String?
-  createdBy          User?            @relation("OrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy          User?              @relation("OrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
   shippingMethodCode String?
   // The shipping company (carrier) chosen for this order, distinct from the
   // shipping *method* (price/ETA). Nullable for historical orders.
   shippingCompanyId  String?
-  shippingCompany    ShippingCompany? @relation(fields: [shippingCompanyId], references: [id], onDelete: SetNull)
+  shippingCompany    ShippingCompany?   @relation(fields: [shippingCompanyId], references: [id], onDelete: SetNull)
   trackingNumber     String?
   carrier            String?
   // Expected delivery date used to compute the "late" condition. "Late" is
@@ -713,8 +746,9 @@ model Order {
   events             OrderEvent[]
   productionTasks    ProductionTask[]
   quickOrderLinks    QuickOrderLink[]
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  redemptions        CouponRedemption[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   @@index([customerId])
   @@index([status])
@@ -749,7 +783,7 @@ model OrderItem {
   sizeSnapshot        Json? // READY: { unit, values: { fieldKey: value } }
   measurementSnapshot Json? // CUSTOM: { unit, cutCode, values, fieldLabels, profileId? }
   cutId               String?
-  cut                 ProductCut?     @relation(fields: [cutId], references: [id], onDelete: SetNull)
+  cut                 ProductCut?      @relation(fields: [cutId], references: [id], onDelete: SetNull)
 
   // ── Per-item tailor assignment & frozen fee (P0 financial) ──
   // Assignment is per piece. The fee is copied from the product's current
@@ -759,9 +793,9 @@ model OrderItem {
   assignedAt       DateTime?
   tailorFeeBhd     Decimal?  @db.Decimal(10, 3)
 
-  productionTasks  ProductionTask[]
-  qcRecords        QcRecord[]
-  settlementItems  TailorSettlementItem[]
+  productionTasks ProductionTask[]
+  qcRecords       QcRecord[]
+  settlementItems TailorSettlementItem[]
 
   @@index([orderId])
   @@index([assignedTailorId])
@@ -786,6 +820,13 @@ model Payment {
   verifiedBy        User?             @relation("PaymentVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
   paidAt            DateTime?
   failedReason      String?
+  // Payment-link / hosted-session tracking. A resend mints a fresh provider
+  // session and records when and by whom it was issued, so link generation is
+  // auditable and a settled payment is never re-linked.
+  paymentUrl        String?           @db.Text
+  linkSentAt        DateTime?
+  linkSentById      String?
+  linkSentBy        User?             @relation("PaymentLinkSender", fields: [linkSentById], references: [id], onDelete: SetNull)
   refunds           Refund[]
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
@@ -793,6 +834,7 @@ model Payment {
   @@index([orderId])
   @@index([status])
   @@index([createdAt])
+  @@index([linkSentById])
 }
 
 enum RefundStatus {
@@ -864,20 +906,20 @@ model Cart {
 }
 
 model CartItem {
-  id        String   @id @default(cuid())
+  id        String          @id @default(cuid())
   cartId    String
-  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
   productId String
   variantId String?
-  quantity  Int      @default(1)
+  quantity  Int             @default(1)
   // Stable grouping key for one commercial line. Encodes product + variant +
   // the measurement configuration, so two pieces of the same product with
   // different measurements stay separate lines ("" for legacy non-measurement
   // lines, which the migration backfills to product|variant).
-  configKey String   @default("")
+  configKey String          @default("")
   pieces    CartItemPiece[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
   @@unique([cartId, configKey])
   @@index([cartId])
@@ -1058,23 +1100,23 @@ model Tailor {
 // credentials. `sessionVersion` invalidates live sessions the moment an admin
 // disables the account or resets the password.
 model TailorCredential {
-  id                  String    @id @default(cuid())
-  tailorId            String    @unique
-  tailor              Tailor    @relation(fields: [tailorId], references: [id], onDelete: Cascade)
-  username            String    @unique
-  passwordHash        String
-  isActive            Boolean   @default(true)
-  mustChangePassword  Boolean   @default(true)
-  credentialsSentAt   DateTime?
+  id                   String    @id @default(cuid())
+  tailorId             String    @unique
+  tailor               Tailor    @relation(fields: [tailorId], references: [id], onDelete: Cascade)
+  username             String    @unique
+  passwordHash         String
+  isActive             Boolean   @default(true)
+  mustChangePassword   Boolean   @default(true)
+  credentialsSentAt    DateTime?
   lastPasswordChangeAt DateTime?
-  lastLoginAt         DateTime?
-  sessionVersion      Int       @default(0)
+  lastLoginAt          DateTime?
+  sessionVersion       Int       @default(0)
   // Brute-force protection. Persisted (not in-memory) so a restart cannot clear
   // an in-progress lockout.
-  failedLoginAttempts Int       @default(0)
-  lockedUntil         DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  failedLoginAttempts  Int       @default(0)
+  lockedUntil          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   @@index([isActive])
 }
@@ -1098,35 +1140,35 @@ enum TaskPriority {
 }
 
 model ProductionTask {
-  id          String       @id @default(cuid())
-  code        String       @unique
-  orderId     String
-  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderItemId String?
-  orderItem   OrderItem?   @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
-  productId   String?
-  tailorId    String?
-  tailor      Tailor?      @relation(fields: [tailorId], references: [id], onDelete: SetNull)
-  titleEn     String
-  titleAr     String?
-  priority    TaskPriority @default(NORMAL)
-  status      TaskStatus   @default(PENDING)
+  id               String       @id @default(cuid())
+  code             String       @unique
+  orderId          String
+  order            Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId      String?
+  orderItem        OrderItem?   @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  productId        String?
+  tailorId         String?
+  tailor           Tailor?      @relation(fields: [tailorId], references: [id], onDelete: SetNull)
+  titleEn          String
+  titleAr          String?
+  priority         TaskPriority @default(NORMAL)
+  status           TaskStatus   @default(PENDING)
   // Frozen tailoring fee for this piece. Copied from the product/assignment at
   // creation time; never recalculated. There is no hidden fallback — a task
   // cannot be created without an explicit fee.
-  feeBhd      Decimal?     @db.Decimal(10, 3)
+  feeBhd           Decimal?     @db.Decimal(10, 3)
   // Tailor acceptance
-  acceptedAt  DateTime?
-  dueDate     DateTime?
-  startedAt   DateTime?
+  acceptedAt       DateTime?
+  dueDate          DateTime?
+  startedAt        DateTime?
   submittedForQcAt DateTime?
-  completedAt DateTime?
-  notes       String?      @db.Text
-  qcRecords   QcRecord[]
-  createdById String?
-  createdBy   User?        @relation("ProductionTaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  completedAt      DateTime?
+  notes            String?      @db.Text
+  qcRecords        QcRecord[]
+  createdById      String?
+  createdBy        User?        @relation("ProductionTaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   @@index([status])
   @@index([tailorId])
@@ -1143,32 +1185,32 @@ enum QcStatus {
 }
 
 model QcRecord {
-  id             String         @id @default(cuid())
-  taskId         String
-  task           ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  orderItemId    String?
-  orderItem      OrderItem?     @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
-  tailorId       String?
-  tailor         Tailor?        @relation(fields: [tailorId], references: [id], onDelete: SetNull)
+  id              String         @id @default(cuid())
+  taskId          String
+  task            ProductionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  orderItemId     String?
+  orderItem       OrderItem?     @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  tailorId        String?
+  tailor          Tailor?        @relation(fields: [tailorId], references: [id], onDelete: SetNull)
   // Attempt number within the item's QC history (1, 2, 3 …). History is never
   // overwritten: each QC run appends a new row.
-  attempt        Int            @default(1)
-  status         QcStatus       @default(PENDING)
+  attempt         Int            @default(1)
+  status          QcStatus       @default(PENDING)
   // Checklist
-  measurementsOk Boolean        @default(false)
-  stitchingOk    Boolean        @default(false)
-  fabricOk       Boolean        @default(false)
-  finishingOk    Boolean        @default(false)
-  accessoriesOk  Boolean        @default(false)
-  packagingOk    Boolean        @default(false)
+  measurementsOk  Boolean        @default(false)
+  stitchingOk     Boolean        @default(false)
+  fabricOk        Boolean        @default(false)
+  finishingOk     Boolean        @default(false)
+  accessoriesOk   Boolean        @default(false)
+  packagingOk     Boolean        @default(false)
   // Mandatory when the result is FAILED / REWORK_REQUIRED — enforced in code.
-  rejectionReason String?       @db.Text
-  notes          String?        @db.Text
-  checkedById    String?
-  checkedBy      User?          @relation("QcChecker", fields: [checkedById], references: [id], onDelete: SetNull)
-  checkedAt      DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  rejectionReason String?        @db.Text
+  notes           String?        @db.Text
+  checkedById     String?
+  checkedBy       User?          @relation("QcChecker", fields: [checkedById], references: [id], onDelete: SetNull)
+  checkedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   @@index([taskId])
   @@index([orderItemId])
@@ -1185,32 +1227,32 @@ enum SettlementStatus {
 }
 
 model TailorSettlement {
-  id             String           @id @default(cuid())
-  number         String           @unique
-  tailorId       String
-  tailor         Tailor           @relation(fields: [tailorId], references: [id], onDelete: Cascade)
-  periodStart    DateTime?
-  periodEnd      DateTime?
-  tasksCount     Int              @default(0)
-  grossBhd       Decimal          @default(0) @db.Decimal(12, 3)
-  adjustmentsBhd Decimal          @default(0) @db.Decimal(12, 3)
-  paidBhd        Decimal          @default(0) @db.Decimal(12, 3)
-  netBhd         Decimal          @default(0) @db.Decimal(12, 3)
-  status         SettlementStatus @default(PENDING)
-  notes          String?          @db.Text
+  id                  String                 @id @default(cuid())
+  number              String                 @unique
+  tailorId            String
+  tailor              Tailor                 @relation(fields: [tailorId], references: [id], onDelete: Cascade)
+  periodStart         DateTime?
+  periodEnd           DateTime?
+  tasksCount          Int                    @default(0)
+  grossBhd            Decimal                @default(0) @db.Decimal(12, 3)
+  adjustmentsBhd      Decimal                @default(0) @db.Decimal(12, 3)
+  paidBhd             Decimal                @default(0) @db.Decimal(12, 3)
+  netBhd              Decimal                @default(0) @db.Decimal(12, 3)
+  status              SettlementStatus       @default(PENDING)
+  notes               String?                @db.Text
   // Transfer proof metadata (URL + free-text reference). Required to enter
   // TRANSFERRED — enforced in the settlement service, not just the UI.
-  transferProofUrl   String?     @db.Text
-  transferReference  String?
-  transferredAt      DateTime?
+  transferProofUrl    String?                @db.Text
+  transferReference   String?
+  transferredAt       DateTime?
   confirmedByTailorAt DateTime?
-  approvedById   String?
-  approvedBy     User?            @relation("SettlementApprover", fields: [approvedById], references: [id], onDelete: SetNull)
-  approvedAt     DateTime?
-  paidAt         DateTime?
-  items          TailorSettlementItem[]
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  approvedById        String?
+  approvedBy          User?                  @relation("SettlementApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt          DateTime?
+  paidAt              DateTime?
+  items               TailorSettlementItem[]
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
 
   @@index([tailorId])
   @@index([status])
@@ -1220,14 +1262,14 @@ model TailorSettlement {
 // orderItemId is the database-level guarantee that a piece can never be settled
 // twice, regardless of concurrent requests.
 model TailorSettlementItem {
-  id           String   @id @default(cuid())
+  id           String           @id @default(cuid())
   settlementId String
   settlement   TailorSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
-  orderItemId  String   @unique
-  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  orderItemId  String           @unique
+  orderItem    OrderItem        @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
   // Frozen tailoring fee captured at assignment; copied here for auditability.
-  tailorFeeBhd Decimal  @db.Decimal(10, 3)
-  createdAt    DateTime @default(now())
+  tailorFeeBhd Decimal          @db.Decimal(10, 3)
+  createdAt    DateTime         @default(now())
 
   @@index([settlementId])
 }
@@ -1369,24 +1411,24 @@ enum QuickOrderSource {
 // a customer. Nothing trusted (price, name, availability) is encoded here — the
 // product is resolved live from the catalogue when the link is opened.
 model QuickOrderLink {
-  id           String           @id @default(cuid())
+  id            String           @id @default(cuid())
   // Internal human-readable id, e.g. QOL-2609-000123.
-  code         String           @unique
+  code          String           @unique
   // Public URL token. High-entropy; unique at the database level.
-  token        String           @unique
-  productId    String
-  source       QuickOrderSource @default(WHATSAPP)
-  createdById  String?
-  createdBy    User?            @relation("QuickOrderLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  token         String           @unique
+  productId     String
+  source        QuickOrderSource @default(WHATSAPP)
+  createdById   String?
+  createdBy     User?            @relation("QuickOrderLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
   customerPhone String?
-  sentAt       DateTime?
-  openedAt     DateTime?
-  orderId      String?
-  order        Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  expiresAt    DateTime?
-  revokedAt    DateTime?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  sentAt        DateTime?
+  openedAt      DateTime?
+  orderId       String?
+  order         Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  expiresAt     DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
   @@index([productId])
   @@index([orderId])
@@ -1398,17 +1440,17 @@ model QuickOrderLink {
 // ───────────────────────────────────────────────────────────
 
 model MembershipTier {
-  id             String     @id @default(cuid())
-  code           String     @unique
-  nameEn         String
-  nameAr         String
+  id            String     @id @default(cuid())
+  code          String     @unique
+  nameEn        String
+  nameAr        String
   // Minimum count of qualifying paid, non-refunded abayas.
-  minQualifying  Int        @default(0)
-  isActive       Boolean    @default(true)
-  sortOrder      Int        @default(0)
-  customers      Customer[]
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  minQualifying Int        @default(0)
+  isActive      Boolean    @default(true)
+  sortOrder     Int        @default(0)
+  customers     Customer[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   @@index([isActive])
 }
@@ -1425,18 +1467,18 @@ enum NotificationTargetType {
 // Configurable mapping from a domain event key to recipients. The dispatch
 // foundation consults these rows; nothing is hard-coded in call sites.
 model NotificationRule {
-  id             String               @id @default(cuid())
-  eventKey       String // e.g. order.created, qc.failed
-  nameEn         String
-  nameAr         String
-  targetType     NotificationTargetType @default(STAFF)
+  id                 String                 @id @default(cuid())
+  eventKey           String // e.g. order.created, qc.failed
+  nameEn             String
+  nameAr             String
+  targetType         NotificationTargetType @default(STAFF)
   // Permission required to receive this event (staff targets only).
   requiredPermission String?
-  priority       TaskPriority         @default(NORMAL)
-  isActive       Boolean              @default(true)
-  sortOrder      Int                  @default(0)
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  priority           TaskPriority           @default(NORMAL)
+  isActive           Boolean                @default(true)
+  sortOrder          Int                    @default(0)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   @@unique([eventKey, targetType])
   @@index([isActive])

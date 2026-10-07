@@ -36,7 +36,7 @@ export function CartView({
   const { cart, updateItem, removeItem, busy, refreshCart, currencyMeta } = useStore();
   const [shippingCode, setShippingCode] = useState(shipping[0]?.code ?? '');
   const [coupon, setCoupon] = useState('');
-  const [couponState, setCouponState] = useState<{ status: 'idle' | 'applied' | 'invalid' | 'min'; discountBhd: number; freeShipping: boolean }>(
+  const [couponState, setCouponState] = useState<{ status: 'idle' | 'applied' | 'invalid' | 'min'; discountBhd: number; freeShipping: boolean; reason?: 'couponMinOrder' | 'couponUsed' | 'couponMembership' | 'couponInvalid' }>(
     { status: 'idle', discountBhd: 0, freeShipping: false },
   );
   const [applying, setApplying] = useState(false);
@@ -83,7 +83,20 @@ export function CartView({
       if (data.ok) {
         setCouponState({ status: 'applied', discountBhd: data.discountBhd ?? 0, freeShipping: Boolean(data.freeShipping) });
       } else {
-        setCouponState({ status: data.error === 'couponMinOrder' ? 'min' : 'invalid', discountBhd: 0, freeShipping: false });
+        const reason =
+          data.error === 'couponMinOrder'
+            ? 'couponMinOrder'
+            : data.error === 'couponUsed'
+              ? 'couponUsed'
+              : data.error === 'couponMembership'
+                ? 'couponMembership'
+                : 'couponInvalid';
+        setCouponState({
+          status: reason === 'couponMinOrder' ? 'min' : 'invalid',
+          discountBhd: 0,
+          freeShipping: false,
+          reason,
+        });
       }
     } catch {
       setCouponState({ status: 'invalid', discountBhd: 0, freeShipping: false });
@@ -260,7 +273,11 @@ export function CartView({
               : couponState.status === 'min'
                 ? dict.cart.couponMinOrder
                 : couponState.status === 'invalid'
-                  ? dict.cart.couponInvalid
+                  ? couponState.reason === 'couponUsed'
+                    ? dict.cart.couponUsed
+                    : couponState.reason === 'couponMembership'
+                      ? dict.cart.couponMembership
+                      : dict.cart.couponInvalid
                   : '·'}
           </p>
         </div>

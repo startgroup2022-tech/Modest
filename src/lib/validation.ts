@@ -85,6 +85,10 @@ export const addressSchema = z.object({
 });
 
 export const measurementSchema = z.object({
+  id: z.string().min(1).max(64).optional(),
+  // When true the client is explicitly adding a new profile, so the API must
+  // create rather than fall back to updating the caller's default profile.
+  create: z.boolean().optional(),
   name: z.string().trim().max(60).optional().or(z.literal('')),
   unit: z.enum(['cm', 'in']).default('cm'),
   height: z.coerce.number().positive().max(300).optional().nullable(),
@@ -96,6 +100,7 @@ export const measurementSchema = z.object({
   armhole: z.coerce.number().positive().max(200).optional().nullable(),
   length: z.coerce.number().positive().max(300).optional().nullable(),
   notes: z.string().trim().max(500).optional().or(z.literal('')),
+  isDefault: z.boolean().optional(),
 });
 
 export const profileSchema = z.object({
