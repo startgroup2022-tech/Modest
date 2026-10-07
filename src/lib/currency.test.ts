@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CURRENCY, selectCurrency, symbolFor, type StoreCurrency } from '@/lib/currency-select';
+import { DEFAULT_CURRENCY, currencyMetaFor, selectCurrency, symbolFor, type StoreCurrency } from '@/lib/currency-select';
 
 const currency = (over: Partial<StoreCurrency>): StoreCurrency => ({
   code: 'BHD',
@@ -46,5 +46,29 @@ describe('symbolFor', () => {
 
   it('falls back to the English symbol when no Arabic symbol exists', () => {
     expect(symbolFor(currency({ symbolAr: '' }), 'ar')).toBe('BHD');
+  });
+});
+
+describe('currencyMetaFor', () => {
+  it('uses ISO 4217 decimals per currency', () => {
+    expect(currencyMetaFor('BHD').decimals).toBe(3);
+    expect(currencyMetaFor('KWD').decimals).toBe(3);
+    expect(currencyMetaFor('OMR').decimals).toBe(3);
+    expect(currencyMetaFor('SAR').decimals).toBe(2);
+    expect(currencyMetaFor('AED').decimals).toBe(2);
+    expect(currencyMetaFor('QAR').decimals).toBe(2);
+  });
+
+  it('exposes locale-appropriate symbols', () => {
+    expect(currencyMetaFor('SAR').symbolAr).toBe('ر.س');
+    expect(currencyMetaFor('AED').symbolEn).toBe('AED');
+  });
+
+  it('falls back to the accounting currency for an unknown or missing code', () => {
+    expect(currencyMetaFor(null).code).toBe('BHD');
+    expect(currencyMetaFor(undefined).decimals).toBe(3);
+    const unknown = currencyMetaFor('XYZ');
+    expect(unknown.code).toBe('XYZ');
+    expect(unknown.decimals).toBe(3);
   });
 });

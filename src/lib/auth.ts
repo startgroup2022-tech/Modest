@@ -4,6 +4,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import { cache } from 'react';
 import { prisma } from './prisma';
+import { authSecretKey } from './secrets';
 
 const COOKIE_NAME = 'att_session';
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -27,11 +28,7 @@ export interface SessionPayload {
 }
 
 function secretKey(): Uint8Array {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret || secret.length < 24) {
-    throw new Error('AUTH_SECRET is missing or too short. Set a long random value in .env');
-  }
-  return new TextEncoder().encode(secret);
+  return authSecretKey();
 }
 
 export async function hashPassword(password: string): Promise<string> {

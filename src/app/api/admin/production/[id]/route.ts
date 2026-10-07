@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
 import { PRODUCTION_TRANSITIONS, canTransition } from '@/lib/workflow';
+import { assertOrderSettledForProduction } from '@/lib/production-gate';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,20 @@ export const PATCH = adminHandler('production.manage', async ({ admin, req }) =>
   else if (d.action === 'complete') target = 'COMPLETED';
   else if (d.action === 'rework') target = 'REWORK';
   else if (d.action === 'cancel') target = 'CANCELLED';
+
+  // Starting or (re)assigning production work requires a captured payment. A
+  // task that was created before this rule existed, or one whose payment was
+  // never confirmed, cannot be started from the queue either.
+  if (d.action === 'start' || (d.action === 'assign' && d.tailorId)) {
+    try {
+      await assertOrderSettledForProduction(task.orderId);
+    } catch {
+      return NextResponse.json(
+        { error: 'Payment must be confirmed before production can begin', code: 'PAYMENT_REQUIRED' },
+        { status: 409 },
+      );
+    }
+  }
 
   if (target) {
     if (!canTransition(PRODUCTION_TRANSITIONS, task.status, target)) {

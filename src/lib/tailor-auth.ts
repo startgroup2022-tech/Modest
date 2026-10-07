@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { prisma } from './prisma';
 import { hashPassword, verifyPassword, readSessionToken, type SessionPayload } from './auth';
 import { writeAudit } from './audit';
+import { authSecretKey } from './secrets';
 import { SignJWT } from 'jose';
 
 /**
@@ -191,9 +192,7 @@ export interface CurrentTailor {
 }
 
 async function secretKey(): Promise<Uint8Array> {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret || secret.length < 24) throw new Error('AUTH_SECRET is missing or too short.');
-  return new TextEncoder().encode(secret);
+  return authSecretKey();
 }
 
 export async function createTailorSession(session: TailorSession): Promise<string> {

@@ -219,6 +219,14 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
 
   const presentmentTotal = roundBhd(totals.totalBhd * input.currency.rateToBhd);
 
+  // The coupon's own id is what links the order to the code it consumed; the
+  // discount itself is computed from `coupon` above. Without this the order's
+  // `couponId` stayed null and reporting could not attribute the discount.
+  const couponIdForOrder =
+    coupon && 'id' in (coupon as unknown as Record<string, unknown>)
+      ? (coupon as unknown as { id: string }).id
+      : null;
+
   const order = await prisma.$transaction(async (tx) => {
     const orderNumber = await nextSequence(tx, {
       key: `order:${monthlyScope()}`,
@@ -249,8 +257,9 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
         presentmentRate: input.currency.rateToBhd,
         presentmentTotal,
         rateCapturedAt: new Date(),
-        couponId: coupon ? undefined : null,
+        couponId: couponIdForOrder,
         couponCode: checkout.couponCode || null,
+        locale: input.locale,
         idempotencyKey: input.idempotencyKey ?? null,
         items: {
           // A cut product is itemised one OrderItem per physical piece so each
@@ -329,19 +338,16 @@ export async function createOrder(input: CreateOrderInput): Promise<CreatedOrder
       });
     }
 
-    const couponId = coupon && 'id' in (coupon as unknown as Record<string, unknown>)
-      ? ((coupon as unknown as { id: string }).id)
-      : null;
-    if (couponId) {
+    if (couponIdForOrder) {
       await tx.coupon.update({
-        where: { id: couponId },
+        where: { id: couponIdForOrder },
         data: { usedCount: { increment: 1 } },
       });
       // Append-only redemption row: the per-customer limit and refund reverts
       // both read from this, and history is never rewritten.
       await tx.couponRedemption.create({
         data: {
-          couponId,
+          couponId: couponIdForOrder,
           customerId: input.customerId,
           orderId: created.id,
           guestEmailHash: input.customerId ? null : (input.guestEmailHash ?? null),
@@ -486,7 +492,7 @@ export async function applyPaymentResult(params: {
     const payment = await tx.payment.findFirst({
       where: { orderId },
       orderBy: { createdAt: 'desc' },
-      include: { order: { select: { customerId: true, orderNumber: true } } },
+      include: { order: { select: { customerId: true, orderNumber: true, status: true } } },
     });
     if (!payment) throw new CheckoutError('Payment not found', 'PAYMENT_FAILED');
 
@@ -516,15 +522,20 @@ export async function applyPaymentResult(params: {
     let justPaid = false;
     if (status === 'PAID') {
       justPaid = true;
-      await tx.order.update({ where: { id: orderId }, data: { status: 'CONFIRMED' } });
-      await tx.orderEvent.create({
-        data: {
-          orderId,
-          status: 'CONFIRMED',
-          messageEn: 'Payment confirmed',
-          messageAr: 'تم تأكيد الدفع',
-        },
-      });
+      // Only the PENDING → CONFIRMED transition is ours to make. If the order
+      // has already moved on (or was cancelled/refunded), a late callback must
+      // not drag it backwards into CONFIRMED.
+      if (payment.order.status === 'PENDING') {
+        await tx.order.update({ where: { id: orderId }, data: { status: 'CONFIRMED' } });
+        await tx.orderEvent.create({
+          data: {
+            orderId,
+            status: 'CONFIRMED',
+            messageEn: 'Payment confirmed',
+            messageAr: 'تم تأكيد الدفع',
+          },
+        });
+      }
     } else if (status === 'FAILED' || status === 'CANCELLED') {
       await tx.orderEvent.create({
         data: {

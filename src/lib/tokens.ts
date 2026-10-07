@@ -1,5 +1,6 @@
 import 'server-only';
 import { createHash, randomBytes } from 'node:crypto';
+import { requireAuthSecret } from './secrets';
 
 /**
  * Public tokens for shareable links (Quick Order). Tokens are high-entropy and
@@ -20,9 +21,13 @@ export function hashToken(token: string): string {
  * is never stored on a redemption row, so guests cannot be enumerated from the
  * coupon tables. The value is salted with `AUTH_SECRET` so it is not a plain
  * rainbow-table lookup of common addresses.
+ *
+ * The salt is mandatory: a predictable fallback would make every guest hash
+ * reversible from a public email list, so this throws in production when the
+ * secret is absent rather than degrading silently.
  */
 export function hashGuestEmail(email: string): string {
   const normalized = email.trim().toLowerCase();
-  const salt = process.env.AUTH_SECRET ?? 'attention';
-  return createHash('sha256').update(`${salt}:${normalized}`).digest('hex');
+  return createHash('sha256').update(`${requireAuthSecret()}:${normalized}`).digest('hex');
 }
+

@@ -2,6 +2,7 @@ import 'server-only';
 import { prisma } from './prisma';
 import { nextSequence } from './sequences';
 import { resolveTailorFee, TailorFeeError } from './tailor-fees';
+import { assertOrderSettledForProduction, ProductionGateError } from './production-gate';
 import type { Prisma } from '@prisma/client';
 
 /**
@@ -37,6 +38,18 @@ export async function assignTailorToItem(input: AssignTailorInput) {
       include: { product: { select: { nameEn: true, nameAr: true, tailorFeeBhd: true } } },
     });
     if (!item) throw new AssignmentError('Order item not found', 'NOT_FOUND');
+
+    // Assignment starts production work, so it is gated on captured payment just
+    // like the order-status transition. A direct assignment call cannot put an
+    // unpaid order onto the sewing floor.
+    try {
+      await assertOrderSettledForProduction(item.orderId, tx);
+    } catch (err) {
+      if (err instanceof ProductionGateError) {
+        throw new AssignmentError('Payment must be confirmed before assigning production work', 'PAYMENT_REQUIRED');
+      }
+      throw err;
+    }
 
     const tailor = await tx.tailor.findUnique({ where: { id: input.tailorId } });
     if (!tailor) throw new AssignmentError('Tailor not found', 'NOT_FOUND');

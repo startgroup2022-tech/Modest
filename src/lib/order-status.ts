@@ -117,3 +117,28 @@ export const PAYMENT_STATUS_KEY: Record<string, string> = {
 export function customerPaymentStatusKey(status: string): string {
   return PAYMENT_STATUS_KEY[status] ?? 'paymentPending';
 }
+
+/** Statuses a customer may see on their own timeline. Internal workflow states
+ * (e.g. QC, settlement) are never part of this set. */
+const CUSTOMER_TIMELINE_STATUSES = new Set<string>([...ORDER_TIMELINE, 'CANCELLED', 'REFUNDED', 'REFUND_REQUESTED']);
+
+/**
+ * Projects the raw order events onto a customer-safe timeline. Message text is
+ * always replaced with the canonical localised copy for the status, so an
+ * employee-only note stored on an event can never reach the storefront, and any
+ * status outside the customer-safe set is dropped. The earliest occurrence of a
+ * status wins (events arrive oldest-first).
+ */
+export function toCustomerTimeline(
+  events: { status: string; createdAt: Date }[],
+): { status: string; messageEn: string; messageAr: string; createdAt: Date }[] {
+  const seen = new Set<string>();
+  const out: { status: string; messageEn: string; messageAr: string; createdAt: Date }[] = [];
+  for (const e of events) {
+    if (!CUSTOMER_TIMELINE_STATUSES.has(e.status) || seen.has(e.status)) continue;
+    seen.add(e.status);
+    const msg = statusMessage(e.status as OrderStatus);
+    out.push({ status: e.status, messageEn: msg.en, messageAr: msg.ar, createdAt: e.createdAt });
+  }
+  return out;
+}

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
 import { CheckIcon, PackageIcon, WhatsAppIcon } from '@/components/ui/icons';
+import { OrderPrice } from '@/components/ui/OrderPrice';
 import { getStoreInfo } from '@/lib/site';
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -86,7 +87,12 @@ export default async function CheckoutSuccessPage({
           <div className="flex items-center justify-between text-h4">
             <dt>{dict.cart.total}</dt>
             <dd className="tabular-nums">
-              {Number(order.totalBhd).toFixed(3)} {order.presentmentCode}
+              <OrderPrice
+                amountBhd={Number(order.totalBhd)}
+                code={order.presentmentCode}
+                rate={Number(order.presentmentRate)}
+                locale={locale}
+              />
             </dd>
           </div>
         </dl>

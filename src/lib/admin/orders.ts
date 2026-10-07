@@ -5,6 +5,7 @@ import { canTransition, nextStatuses, statusMessage } from '../order-status';
 import { releaseOrderStock } from '../orders';
 import { notifyOrderStatus, createNotification } from '../notifications';
 import { recomputeCustomerMembership } from '../membership-db';
+import { assertOrderSettledForProduction } from '../production-gate';
 import { getPaymentProvider } from '../payments';
 import type { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
 
@@ -77,10 +78,9 @@ export async function transitionOrder(admin: AdminUser, input: TransitionInput) 
     // manufacturing an unpaid order. Owners who deliberately start work before
     // payment must confirm the payment first.
     if (input.to === 'IN_PRODUCTION') {
-      const settled = order.payments.some(
-        (p) => p.status === 'PAID' || p.status === 'PARTIALLY_REFUNDED' || p.status === 'REFUNDED',
-      );
-      if (!settled) {
+      try {
+        await assertOrderSettledForProduction(order.id, tx);
+      } catch {
         throw new AdminActionError(
           'Payment must be confirmed before production can begin',
           'PAYMENT_REQUIRED',
@@ -232,16 +232,23 @@ export async function createRefund(admin: AdminUser, input: RefundInput) {
     // Money can only be refunded after it was actually received. This blocks the
     // class of bug where staff "refund" an unpaid order and the ledger implies a
     // payment that never happened.
-    const settled = order.payments.some((p) => p.status === 'PAID' || p.status === 'PARTIALLY_REFUNDED' || p.status === 'REFUNDED');
-    if (!settled) {
+    const settledPayments = order.payments.filter(
+      (p) => p.status === 'PAID' || p.status === 'PARTIALLY_REFUNDED' || p.status === 'REFUNDED',
+    );
+    if (!settledPayments.length) {
       throw new AdminActionError('This order has no captured payment to refund', 'NOT_PAID', 409);
     }
 
+    // Refundable balance is the amount actually captured, not the order total.
+    // This keeps a discount (or a partial capture) from being refunded as cash:
+    // the ceiling is min(order total, captured) minus what was already refunded.
+    const capturedBhd = settledPayments.reduce((s, p) => s + Number(p.amountBhd), 0);
+    const ceilingBhd = Math.min(capturedBhd, Number(order.totalBhd));
     const alreadyRefunded = order.refunds
       .filter((r) => r.status === 'COMPLETED')
       .reduce((s, r) => s + Number(r.amountBhd), 0);
-    if (alreadyRefunded + input.amountBhd > Number(order.totalBhd) + 0.0001) {
-      throw new AdminActionError('Refund exceeds the order total', 'REFUND_EXCEEDS_TOTAL', 409);
+    if (alreadyRefunded + input.amountBhd > ceilingBhd + 0.0001) {
+      throw new AdminActionError('Refund exceeds the refundable balance', 'REFUND_EXCEEDS_TOTAL', 409);
     }
 
     const refund = await tx.refund.create({
@@ -257,7 +264,7 @@ export async function createRefund(admin: AdminUser, input: RefundInput) {
     });
 
     const totalRefunded = alreadyRefunded + input.amountBhd;
-    const fullyRefunded = totalRefunded >= Number(order.totalBhd) - 0.0001;
+    const fullyRefunded = totalRefunded >= ceilingBhd - 0.0001;
 
     if (fullyRefunded) {
       // The payment may already be PARTIALLY_REFUNDED from an earlier partial
@@ -278,12 +285,21 @@ export async function createRefund(admin: AdminUser, input: RefundInput) {
         data: { revertedAt: new Date() },
       });
       if (reverted.count > 0) {
-        const redemptions = await tx.couponRedemption.findMany({ where: { orderId: order.id }, select: { couponId: true } });
-        const couponIds = [...new Set(redemptions.map((r) => r.couponId))];
-        await tx.coupon.updateMany({
-          where: { id: { in: couponIds }, usedCount: { gt: 0 } },
-          data: { usedCount: { decrement: 1 } },
+        // Decrement per coupon by the number of redemptions actually reverted on
+        // this order, so a coupon used more than once across the same order (or a
+        // retried revert) cannot drift `usedCount` out of step with history.
+        const redemptions = await tx.couponRedemption.findMany({
+          where: { orderId: order.id },
+          select: { couponId: true },
         });
+        const perCoupon = new Map<string, number>();
+        for (const r of redemptions) perCoupon.set(r.couponId, (perCoupon.get(r.couponId) ?? 0) + 1);
+        for (const [couponId, count] of perCoupon) {
+          await tx.coupon.updateMany({
+            where: { id: couponId, usedCount: { gt: 0 } },
+            data: { usedCount: { decrement: count } },
+          });
+        }
       }
     } else {
       await tx.payment.updateMany({
@@ -355,6 +371,7 @@ export async function resendPaymentLink(admin: AdminUser, paymentId: string, bas
           shippingName: true,
           email: true,
           phone: true,
+          locale: true,
         },
       },
     },
@@ -376,8 +393,8 @@ export async function resendPaymentLink(admin: AdminUser, paymentId: string, bas
       email: payment.order.email,
       phone: payment.order.phone,
     },
-    returnUrl: `${baseUrl}/en/checkout/success`,
-    cancelUrl: `${baseUrl}/en/checkout`,
+    returnUrl: `${baseUrl}/${payment.order.locale === 'ar' ? 'ar' : 'en'}/checkout/success`,
+    cancelUrl: `${baseUrl}/${payment.order.locale === 'ar' ? 'ar' : 'en'}/checkout`,
   });
 
   if (init.status === 'FAILED' || !init.redirectUrl) {

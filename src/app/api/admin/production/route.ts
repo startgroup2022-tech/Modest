@@ -4,6 +4,7 @@ import { adminHandler } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
 import { nextSequenceStandalone } from '@/lib/sequences';
 import { resolveTailorFee, TailorFeeError } from '@/lib/tailor-fees';
+import { assertOrderSettledForProduction } from '@/lib/production-gate';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,18 @@ export const POST = adminHandler('production.manage', async ({ admin, req }) => 
 
   const order = await prisma.order.findUnique({ where: { id: d.orderId } });
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+
+  // Production work may not be created for an unpaid order. This is the same
+  // invariant enforced on the status transition and on tailor assignment, so a
+  // direct API call cannot start manufacturing before money is captured.
+  try {
+    await assertOrderSettledForProduction(order.id);
+  } catch {
+    return NextResponse.json(
+      { error: 'Payment must be confirmed before production can begin', code: 'PAYMENT_REQUIRED' },
+      { status: 409 },
+    );
+  }
 
   const product = d.productId
     ? await prisma.product.findUnique({ where: { id: d.productId }, select: { tailorFeeBhd: true } })
