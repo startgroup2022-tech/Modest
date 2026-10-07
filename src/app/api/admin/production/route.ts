@@ -27,6 +27,13 @@ export const POST = adminHandler('production.manage', async ({ admin, req }) => 
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Validation failed', issues: parsed.error.issues }, { status: 422 });
   const d = parsed.data;
+
+  // Assigning a tailor to a task is a distinct authority from managing the
+  // production queue; require `orders.assign` when a tailor is named.
+  if (d.tailorId && !admin.permissions.has('orders.assign')) {
+    return NextResponse.json({ error: 'You cannot assign tailors', code: 'ASSIGN_FORBIDDEN' }, { status: 403 });
+  }
+
   const order = await prisma.order.findUnique({ where: { id: d.orderId } });
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 

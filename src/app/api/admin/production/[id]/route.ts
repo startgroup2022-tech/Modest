@@ -27,6 +27,13 @@ export const PATCH = adminHandler('production.manage', async ({ admin, req }) =>
   const data: Record<string, unknown> = {};
   if (d.notes !== undefined) data.notes = d.notes || null;
 
+  // Reassigning a task to a different tailor (or unassigning it) is an
+  // assignment decision and requires `orders.assign`, not merely the ability to
+  // manage the production queue.
+  if (d.action === 'assign' && d.tailorId !== task.tailorId && !admin.permissions.has('orders.assign')) {
+    return NextResponse.json({ error: 'You cannot assign tailors', code: 'ASSIGN_FORBIDDEN' }, { status: 403 });
+  }
+
   // Resolve the status this action would produce, then validate the edge.
   let target: string | null = null;
   if (d.action === 'assign') target = d.tailorId ? 'ASSIGNED' : 'PENDING';

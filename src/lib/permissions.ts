@@ -93,3 +93,15 @@ export function forbiddenGrants(
   for (const p of desired) if (!canAdministerPermission(actor, p)) bad.push(p);
   return bad;
 }
+
+/**
+ * Whether a product status change is a publication decision rather than an
+ * editorial one. Publishing, unpublishing, archiving or restoring any change of
+ * `status` is treated as approval-level, so an employee who may edit product
+ * copy cannot silently put a product live (or pull it) without
+ * `products.approve`. Keeping a product in its current status needs only
+ * `products.edit`.
+ */
+export function productStatusChangeRequiresApproval(current: string, next: string): boolean {
+  return current !== next;
+}

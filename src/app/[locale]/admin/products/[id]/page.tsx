@@ -87,7 +87,7 @@ export default async function EditProductPage({
   const { locale: raw, id } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
-  await requireAdminPage('products.view', locale);
+  const admin = await requireAdminPage('products.view', locale);
   const dict = getAdminDict(locale);
   const href = (p: string) => adminHref(locale, p);
 
@@ -128,6 +128,7 @@ export default async function EditProductPage({
             <ProductForm
               initial={formData}
               locale={locale}
+              canApprove={admin.permissions.has('products.approve')}
               dict={{ products: dict.products, common: dict.common }}
               categories={categories.map((c) => ({ id: c.id, name: locale === 'ar' ? c.nameAr : c.nameEn }))}
               collections={collections.map((c) => ({ id: c.id, name: locale === 'ar' ? c.nameAr : c.nameEn }))}

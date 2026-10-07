@@ -96,6 +96,24 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
 - Supervisor viewing is read-only: `buildSupervisorContext` /
   `canActAsTailor` (`src/lib/tailor-auth.ts`) keep the supervisor's own identity
   and refuse tailor write actions — never impersonate the tailor.
+- Tailor work scope resolves through `resolveReadableTailorId` /
+  `canWriteTailorWork` / `canReadTailorTask` in the same module. A tailor may
+  read/write only their own work; a supervisor may read the tailor they view but
+  never write; an unassigned task is refused.
+- Permission-specific gates beyond the route's base permission:
+  - Product status change (publish/archive) requires `products.approve`;
+    `ProductForm` receives `canApprove` and locks the status control otherwise.
+  - Naming/reassigning a tailor on a production task requires `orders.assign`.
+  - The dashboard loads each block only if the viewer holds the governing
+    permission (`getDashboardData(locale, permissions)`), so hidden sections do
+    not leak sales/customer/refund/expense data into the page payload.
+
+## Testing notes
+- `RUN_DB_TESTS=1 npm test` enables the DB-backed integration suites. They create
+  and remove their own rows. **Any suite that mutates a seeded role must snapshot
+  and restore the exact prior permission set** — deleting only the keys it added
+  can strip a real seeded permission (this happened to SUPPORT `orders.view`).
+- After DB tests, re-seed roles if in doubt: `npx prisma db seed`.
 
 ## Admin resources → storefront
 - Admin Promotions drive the storefront: `placement: "announcement"` renders the

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { adminHandler, AdminActionError, isSuperAdmin } from '@/lib/admin-auth';
+import { adminHandler, AdminActionError, isSuperAdmin, countEffectiveAdmins } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
 import { hashPassword, bumpSessionVersion } from '@/lib/auth';
 import { getRolePermissions, forbiddenGrants } from '@/lib/permissions';
@@ -56,14 +56,14 @@ export const PATCH = adminHandler('users.manage', async ({ admin, req }) => {
     }
   }
 
-  // Guard against removing the last active super-admin (role ADMIN, active).
+  // Guard against removing the last administrator who can still manage
+  // employees. Counting by role name is not enough — a DENY override can strip
+  // `users.manage` from an admin — so this measures the resolved permission set.
   const losingAdmin = existing.role?.name === 'ADMIN' && (d.roleId !== existing.roleId || d.status !== 'ACTIVE');
   if (losingAdmin) {
-    const remaining = await prisma.user.count({
-      where: { role: { name: 'ADMIN' }, isActive: true, id: { not: id } },
-    });
+    const remaining = await countEffectiveAdmins(id);
     if (remaining === 0) {
-      return NextResponse.json({ error: 'At least one active administrator must remain', code: 'LAST_ADMIN' }, { status: 409 });
+      return NextResponse.json({ error: 'At least one administrator able to manage employees must remain', code: 'LAST_ADMIN' }, { status: 409 });
     }
   }
 

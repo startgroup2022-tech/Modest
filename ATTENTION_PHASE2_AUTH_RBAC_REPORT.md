@@ -103,12 +103,15 @@ Migration `prisma/migrations/20261007025107_phase2_auth_permissions` (additive):
 | Suite | Tests | Scope |
 |---|---|---|
 | `src/lib/permissions.test.ts` | 14 | resolution, overrides, guards |
-| `src/lib/tailor-auth.test.ts` | 11 | temp password, policy, username, supervisor |
+| `src/lib/tailor-auth.test.ts` | 15 | temp password, policy, username, supervisor, work scope |
 | `src/lib/session-boundaries.test.ts` | 5 | `isStaff` boundaries, JWT round-trip, tamper |
-| `src/lib/phase2-auth.integration.test.ts` | 10 | real DB: overrides, atomic replace, session bump, effective-admin counting, full tailor credential lifecycle |
+| `src/lib/authorization-matrix.test.ts` | 12 | employee-specific resolution, deny-by-default, escalation, approval gate, spec coverage |
+| `src/lib/role-boundaries.test.ts` | 6 | customer/tailor/admin role-confusion regression |
+| `src/lib/phase2-auth.integration.test.ts` | 11 | real DB: overrides, atomic replace, session bump, effective-admin counting, disabled account, full tailor credential lifecycle |
 
 The DB suite runs only when `RUN_DB_TESTS=1` (it creates and removes its own
-rows). Without it the file is skipped, so CI without a database stays green.
+rows and restores the seeded role exactly). Without it the file is skipped, so CI
+without a database stays green.
 
 ## Verification gates
 
@@ -117,8 +120,22 @@ rows). Without it the file is skipped, so CI without a database stays green.
 | Prisma schema | `npx prisma validate` / `migrate status` | up to date |
 | Typecheck | `npm run typecheck` | PASS (exit 0) |
 | Lint | `npm run lint` | PASS, no warnings |
-| Unit tests | `npm test` | 21 files, 162 passed (with `RUN_DB_TESTS=1`) |
+| Unit tests | `RUN_DB_TESTS=1 npm test` | 23 files, 185 passed |
 | Production build | `npm run build` | PASS (exit 0) |
+
+## Audit addendum (enforcement review)
+
+A later review of the shipped code found four places where a permission was
+declared and rendered but not enforced server-side, plus a destructive test
+cleanup. All are fixed; see
+[`ATTENTION_PHASE2_AUTH_PERMISSIONS_REPORT.md`](./ATTENTION_PHASE2_AUTH_PERMISSIONS_REPORT.md)
+for the authoritative record:
+
+1. Dashboard withheld data by permission instead of loading everything.
+2. Product publish/archive now requires `products.approve`.
+3. Tailor assignment now requires `orders.assign`.
+4. Employee `PATCH` last-admin guard now counts resolved permissions, not role name.
+5. Integration-test cleanup no longer strips seeded role permissions.
 
 ## Deploy notes
 

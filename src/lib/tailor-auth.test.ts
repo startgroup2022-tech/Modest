@@ -5,6 +5,9 @@ import {
   checkTailorPassword,
   canActAsTailor,
   buildSupervisorContext,
+  resolveReadableTailorId,
+  canWriteTailorWork,
+  canReadTailorTask,
 } from './tailor-auth';
 
 /** Phase 2 — tailor credential and password-policy rules (pure functions). */
@@ -70,5 +73,36 @@ describe('supervisor context', () => {
     expect(canActAsTailor(null)).toBe(false);
     // A genuine tailor context (no readOnly flag) may act.
     expect(canActAsTailor({})).toBe(true);
+  });
+});
+
+describe('tailor work scope', () => {
+  const tailor = { tailorId: 't1' };
+
+  it('lets a tailor read their own work but not another tailor’s', () => {
+    expect(resolveReadableTailorId(tailor, 't1')).toBe('t1');
+    expect(resolveReadableTailorId(tailor, 't2')).toBeNull();
+  });
+
+  it('refuses a tailor write on another tailor’s work', () => {
+    expect(canWriteTailorWork(tailor, 't1')).toBe(true);
+    expect(canWriteTailorWork(tailor, 't2')).toBe(false);
+  });
+
+  it('lets a supervisor read the tailor they view but never write', () => {
+    const supervisor = {
+      tailorId: 'staff-1',
+      supervisor: buildSupervisorContext({ supervisorId: 'u1', supervisorName: 'Manager', viewingTailorId: 't1' }),
+    };
+    expect(resolveReadableTailorId(supervisor, 't1')).toBe('t1');
+    expect(resolveReadableTailorId(supervisor, 't2')).toBeNull();
+    expect(canWriteTailorWork(supervisor, 't1')).toBe(false);
+    expect(canWriteTailorWork(supervisor, 'staff-1')).toBe(false);
+  });
+
+  it('refuses a task with no assigned tailor', () => {
+    expect(canReadTailorTask(tailor, null)).toBe(false);
+    expect(canReadTailorTask(tailor, undefined)).toBe(false);
+    expect(canReadTailorTask(tailor, 't1')).toBe(true);
   });
 });

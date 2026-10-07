@@ -448,3 +448,52 @@ export function buildSupervisorContext(input: {
 export function canActAsTailor(context: { readOnly?: boolean } | null | undefined): boolean {
   return !!context && context.readOnly !== true;
 }
+
+// ── Tailor work scope ───────────────────────────────────
+
+/**
+ * A tailor's principal may only reach work assigned to that tailor. These
+ * helpers are the single place the future Tailor Portal resolves scope, so the
+ * rule is testable now and cannot be re-implemented inconsistently per screen.
+ */
+export interface TailorPrincipal {
+  tailorId: string;
+  /** Present only when an authorised staff member is supervising read-only. */
+  supervisor?: SupervisorContext;
+}
+
+/**
+ * Resolves which tailor's data a request may read. A supervisor may read the
+ * tailor they are viewing; a tailor may only read their own. Anything else is
+ * refused.
+ */
+export function resolveReadableTailorId(
+  principal: TailorPrincipal,
+  requestedTailorId: string,
+): string | null {
+  if (principal.tailorId === requestedTailorId) return requestedTailorId;
+  if (principal.supervisor?.viewingTailorId === requestedTailorId) return requestedTailorId;
+  return null;
+}
+
+/**
+ * Whether a principal may act (write) on a given tailor's work. A supervisor is
+ * always read-only; only the tailor acting as themselves may write, and only
+ * for their own tailor id.
+ */
+export function canWriteTailorWork(
+  principal: TailorPrincipal,
+  targetTailorId: string,
+): boolean {
+  if (principal.supervisor) return false;
+  return principal.tailorId === targetTailorId;
+}
+
+/** Whether a principal may read a production task assigned to `taskTailorId`. */
+export function canReadTailorTask(
+  principal: TailorPrincipal,
+  taskTailorId: string | null | undefined,
+): boolean {
+  if (!taskTailorId) return false;
+  return resolveReadableTailorId(principal, taskTailorId) !== null;
+}

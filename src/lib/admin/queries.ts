@@ -1,6 +1,7 @@
 import 'server-only';
 import { prisma } from '../prisma';
 import type { OrderStatus, Prisma } from '@prisma/client';
+import type { Permission } from '../permission-defs';
 
 /* ── Date ranges ─────────────────────────────────────────── */
 
@@ -86,7 +87,16 @@ export interface DashboardData {
   }[];
 }
 
-export async function getDashboardData(locale: 'en' | 'ar'): Promise<DashboardData> {
+export async function getDashboardData(
+  locale: 'en' | 'ar',
+  permissions: Set<Permission>,
+): Promise<DashboardData> {
+  const can = (p: Permission) => permissions.has(p);
+  // Each block is computed only when the viewer holds the permission that
+  // governs the underlying records. A support employee with `orders.view` but
+  // no `customers.view` must not learn customer counts, sales totals, refund
+  // or expense figures through the dashboard — the sidebar hides the sections,
+  // but the data behind them has to be withheld here too.
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -110,107 +120,135 @@ export async function getDashboardData(locale: 'en' | 'ar'): Promise<DashboardDa
     statusGroups,
     trendOrders,
   ] = await Promise.all([
-    prisma.order.aggregate({
-      where: { createdAt: { gte: startOfToday }, status: { notIn: EXCLUDED_FROM_REVENUE } },
-      _sum: { totalBhd: true },
-    }),
-    prisma.order.aggregate({
-      where: { createdAt: { gte: startOfMonth }, status: { notIn: EXCLUDED_FROM_REVENUE } },
-      _sum: { totalBhd: true },
-    }),
-    prisma.order.aggregate({
-      where: { createdAt: { gte: startOfMonth }, status: { in: PAID_STATUSES } },
-      _sum: { totalBhd: true, discountBhd: true },
-    }),
-    prisma.order.count({ where: { createdAt: { gte: startOfMonth }, status: { notIn: EXCLUDED_FROM_REVENUE } } }),
-    prisma.orderItem.aggregate({
-      where: { order: { createdAt: { gte: startOfMonth }, status: { notIn: EXCLUDED_FROM_REVENUE } } },
-      _sum: { quantity: true },
-    }),
-    prisma.order.aggregate({
-      where: { createdAt: { gte: startOfMonth }, status: { notIn: EXCLUDED_FROM_REVENUE } },
-      _sum: { discountBhd: true },
-    }),
-    prisma.payment.count({ where: { status: { in: ['PENDING', 'INITIATED'] } } }),
-    prisma.productionTask.count({ where: { status: { in: ['PENDING', 'ASSIGNED', 'IN_PROGRESS'] } } }),
-    prisma.qcRecord.count({ where: { status: 'PENDING' } }),
-    prisma.$queryRaw<{ count: bigint }[]>`
-      SELECT COUNT(*) AS count FROM ProductVariant v
-      JOIN Product p ON p.id = v.productId
-      WHERE v.isActive = 1 AND v.stock > 0 AND v.stock <= p.lowStockThreshold
-    `,
-    prisma.customer.count(),
-    prisma.refund.aggregate({ where: { createdAt: { gte: startOfMonth } }, _sum: { amountBhd: true } }),
-    prisma.expense.aggregate({
-      where: { expenseDate: { gte: startOfMonth }, status: { in: ['APPROVED', 'PAID'] } },
-      _sum: { amountBhd: true },
-    }),
-    prisma.order.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 8,
-      select: {
-        id: true,
-        orderNumber: true,
-        shippingName: true,
-        totalBhd: true,
-        status: true,
-        channel: true,
-        createdAt: true,
-      },
-    }),
-    prisma.order.groupBy({
-      by: ['status'],
-      where: { createdAt: { gte: thirtyDaysAgo } },
-      _count: { _all: true },
-    }),
-    prisma.order.findMany({
-      where: { createdAt: { gte: thirtyDaysAgo }, status: { notIn: EXCLUDED_FROM_REVENUE } },
-      select: { createdAt: true, totalBhd: true },
-    }),
+    can('reports.view')
+      ? prisma.order.aggregate({
+          where: { createdAt: { gte: startOfToday }, status: { notIn: EXCLUDED_FROM_REVENUE } },
+          _sum: { totalBhd: true },
+        })
+      : null,
+    can('reports.view')
+      ? prisma.order.aggregate({
+          where: { createdAt: { gte: startOfMonth }, status: { notIn: EXCLUDED_FROM_REVENUE } },
+          _sum: { totalBhd: true },
+        })
+      : null,
+    can('reports.profits')
+      ? prisma.order.aggregate({
+          where: { createdAt: { gte: startOfMonth }, status: { in: PAID_STATUSES } },
+          _sum: { totalBhd: true, discountBhd: true },
+        })
+      : null,
+    can('orders.view')
+      ? prisma.order.count({ where: { createdAt: { gte: startOfMonth }, status: { notIn: EXCLUDED_FROM_REVENUE } } })
+      : 0,
+    can('orders.view')
+      ? prisma.orderItem.aggregate({
+          where: { order: { createdAt: { gte: startOfMonth }, status: { notIn: EXCLUDED_FROM_REVENUE } } },
+          _sum: { quantity: true },
+        })
+      : null,
+    can('reports.view')
+      ? prisma.order.aggregate({
+          where: { createdAt: { gte: startOfMonth }, status: { notIn: EXCLUDED_FROM_REVENUE } },
+          _sum: { discountBhd: true },
+        })
+      : null,
+    can('payments.view') ? prisma.payment.count({ where: { status: { in: ['PENDING', 'INITIATED'] } } }) : 0,
+    can('production.view')
+      ? prisma.productionTask.count({ where: { status: { in: ['PENDING', 'ASSIGNED', 'IN_PROGRESS'] } } })
+      : 0,
+    can('qc.view') ? prisma.qcRecord.count({ where: { status: 'PENDING' } }) : 0,
+    can('inventory.view')
+      ? prisma.$queryRaw<{ count: bigint }[]>`
+          SELECT COUNT(*) AS count FROM ProductVariant v
+          JOIN Product p ON p.id = v.productId
+          WHERE v.isActive = 1 AND v.stock > 0 AND v.stock <= p.lowStockThreshold
+        `
+      : [],
+    can('customers.view') ? prisma.customer.count() : 0,
+    can('orders.refund') ? prisma.refund.aggregate({ where: { createdAt: { gte: startOfMonth } }, _sum: { amountBhd: true } }) : null,
+    can('finance.view')
+      ? prisma.expense.aggregate({
+          where: { expenseDate: { gte: startOfMonth }, status: { in: ['APPROVED', 'PAID'] } },
+          _sum: { amountBhd: true },
+        })
+      : null,
+    can('orders.view')
+      ? prisma.order.findMany({
+          orderBy: { createdAt: 'desc' },
+          take: 8,
+          select: {
+            id: true,
+            orderNumber: true,
+            shippingName: true,
+            totalBhd: true,
+            status: true,
+            channel: true,
+            createdAt: true,
+          },
+        })
+      : [],
+    can('orders.view')
+      ? prisma.order.groupBy({
+          by: ['status'],
+          where: { createdAt: { gte: thirtyDaysAgo } },
+          _count: { _all: true },
+        })
+      : [],
+    can('reports.view')
+      ? prisma.order.findMany({
+          where: { createdAt: { gte: thirtyDaysAgo }, status: { notIn: EXCLUDED_FROM_REVENUE } },
+          select: { createdAt: true, totalBhd: true },
+        })
+      : [],
   ]);
 
-  const monthSales = Number(monthAgg._sum.totalBhd ?? 0);
-  const unitsSold = unitsAgg._sum.quantity ?? 0;
+  const monthSales = Number(monthAgg?._sum.totalBhd ?? 0);
+  const unitsSold = unitsAgg?._sum.quantity ?? 0;
   const avgOrder = ordersCount ? monthSales / ordersCount : 0;
 
   // Daily sales series over the last 30 days.
   const buckets = new Map<string, number>();
-  for (let i = 0; i < 30; i++) {
-    const d = new Date(thirtyDaysAgo.getTime() + i * 86400000);
-    buckets.set(d.toISOString().slice(0, 10), 0);
-  }
-  for (const o of trendOrders) {
-    const k = o.createdAt.toISOString().slice(0, 10);
-    if (buckets.has(k)) buckets.set(k, (buckets.get(k) ?? 0) + Number(o.totalBhd));
+  if (can('reports.view')) {
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(thirtyDaysAgo.getTime() + i * 86400000);
+      buckets.set(d.toISOString().slice(0, 10), 0);
+    }
+    for (const o of trendOrders) {
+      const k = o.createdAt.toISOString().slice(0, 10);
+      if (buckets.has(k)) buckets.set(k, (buckets.get(k) ?? 0) + Number(o.totalBhd));
+    }
   }
   const salesSeries = [...buckets.entries()].map(([label, value]) => ({ label, value }));
 
-  const refundsBhd = Number(refundsAgg._sum.amountBhd ?? 0);
-  const expensesBhd = Number(expensesAgg._sum.amountBhd ?? 0);
+  const refundsBhd = Number(refundsAgg?._sum.amountBhd ?? 0);
+  const expensesBhd = Number(expensesAgg?._sum.amountBhd ?? 0);
 
   const lowStock = Number(lowStockRows[0]?.count ?? 0);
 
-  const refundRequested = await prisma.order.count({ where: { status: 'REFUND_REQUESTED' } });
-  const pendingExpenses = await prisma.expense.count({ where: { status: 'SUBMITTED' } });
-  const pendingOrders = await prisma.order.count({ where: { status: 'PENDING' } });
+  const [refundRequested, pendingExpenses, pendingOrders] = await Promise.all([
+    can('orders.refund') ? prisma.order.count({ where: { status: 'REFUND_REQUESTED' } }) : 0,
+    can('expenses.approve') ? prisma.expense.count({ where: { status: 'SUBMITTED' } }) : 0,
+    can('orders.view') ? prisma.order.count({ where: { status: 'PENDING' } }) : 0,
+  ]);
 
   const actionCenter = [
     { key: 'pendingOrders', count: pendingOrders, severity: 'info' as const, href: 'orders?status=PENDING' },
     { key: 'pendingPayments', count: pendingPayments, severity: 'warn' as const, href: 'payments?status=PENDING' },
     { key: 'qcPending', count: qcPending, severity: 'info' as const, href: 'production/qc' },
     { key: 'lowStock', count: lowStock, severity: 'danger' as const, href: 'inventory?filter=low' },
-    { key: 'pendingExpenses', count: pendingExpenses, severity: 'warn' as const, href: 'expenses/approvals' },
+    { key: 'pendingExpenses', count: pendingExpenses, severity: 'warn' as const, href: 'expenses' },
     { key: 'refundRequested', count: refundRequested, severity: 'danger' as const, href: 'orders?status=REFUND_REQUESTED' },
   ].filter((a) => a.count > 0);
 
   return {
-    todaySalesBhd: Number(todayAgg._sum.totalBhd ?? 0),
+    todaySalesBhd: Number(todayAgg?._sum.totalBhd ?? 0),
     monthSalesBhd: monthSales,
-    netSalesBhd: Number(netAgg._sum.totalBhd ?? 0),
+    netSalesBhd: Number(netAgg?._sum.totalBhd ?? 0),
     ordersCount,
     avgOrderBhd: avgOrder,
     unitsSold,
-    discountsBhd: Number(discountsAgg._sum.discountBhd ?? 0),
+    discountsBhd: Number(discountsAgg?._sum.discountBhd ?? 0),
     pendingPayments,
     inProduction,
     qcPending,

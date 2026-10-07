@@ -76,12 +76,15 @@ export function ProductForm({
   collections,
   dict,
   locale,
+  canApprove = true,
 }: {
   initial: ProductFormData;
   categories: { id: string; name: string }[];
   collections: { id: string; name: string }[];
   dict: Record<string, Record<string, string>>;
   locale: 'en' | 'ar';
+  /** When false, the status control is locked to the product's current value. */
+  canApprove?: boolean;
 }) {
   const router = useRouter();
   const p = dict.products;
@@ -194,11 +197,21 @@ export function ProductForm({
           {field(c.sku, 'sku')}
           <label className="block">
             <span className="adm-kpi-label">{p.status}</span>
-            <select value={data.status} onChange={(e) => set('status', e.target.value)} className="adm-select mt-1">
+            <select
+              value={data.status}
+              onChange={(e) => set('status', e.target.value)}
+              disabled={!canApprove}
+              className="adm-select mt-1 disabled:cursor-not-allowed disabled:opacity-60"
+            >
               <option value="DRAFT">{locale === 'ar' ? 'مسودة' : 'Draft'}</option>
               <option value="ACTIVE">{locale === 'ar' ? 'نشط' : 'Active'}</option>
               <option value="ARCHIVED">{locale === 'ar' ? 'مؤرشف' : 'Archived'}</option>
             </select>
+            {!canApprove && (
+              <span className="mt-1 block text-caption text-ink-faint">
+                {locale === 'ar' ? 'تغيير حالة النشر يتطلب صلاحية الاعتماد' : 'Changing publish status requires approval permission'}
+              </span>
+            )}
           </label>
           <label className="block">
             <span className="adm-kpi-label">{p.kind}</span>

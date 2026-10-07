@@ -25,6 +25,14 @@ export const POST = adminHandler('products.create', async ({ admin, req }) => {
   const slug = rest.slug?.trim() || slugify(rest.nameEn);
   if (!slug) throw new AdminActionError('A slug is required', 'INVALID', 400);
 
+  // Creating a product directly in a published state is an approval decision.
+  if (rest.status !== 'DRAFT' && !admin.permissions.has('products.approve')) {
+    return NextResponse.json(
+      { error: 'You cannot publish a product without approval permission', code: 'APPROVAL_REQUIRED' },
+      { status: 403 },
+    );
+  }
+
   const dupe = await prisma.product.findUnique({ where: { slug } });
   if (dupe) return NextResponse.json({ error: 'That slug is already in use' }, { status: 409 });
 

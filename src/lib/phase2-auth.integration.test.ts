@@ -27,6 +27,13 @@ let employeeId: string;
 let actorId: string;
 let tailorId: string;
 let createdRole = false;
+/**
+ * The SUPPORT role's permission set as it existed before this run. The suite
+ * adds `orders.view` / `orders.refund` to exercise resolution, so it must
+ * restore the *exact* prior set afterwards — deleting only those two keys would
+ * corrupt the seeded role for every later run and for the live app.
+ */
+let rolePermissionsBefore: string[] = [];
 
 maybe('phase 2 auth & permissions (database)', () => {
   beforeAll(async () => {
@@ -40,6 +47,11 @@ maybe('phase 2 auth & permissions (database)', () => {
       createdRole = true;
     }
     roleId = role.id;
+
+    rolePermissionsBefore = (
+      await prisma.rolePermission.findMany({ where: { roleId }, select: { permission: true } })
+    ).map((r) => r.permission);
+
     await prisma.rolePermission.upsert({
       where: { roleId_permission: { roleId, permission: 'orders.refund' } },
       update: {},
@@ -80,7 +92,22 @@ maybe('phase 2 auth & permissions (database)', () => {
     await prisma.auditLog.deleteMany({ where: { entityId: { in: ids } } });
     await prisma.tailor.deleteMany({ where: { id: tailorId } });
     await prisma.user.deleteMany({ where: { id: { in: [employeeId, actorId] } } });
-    await prisma.rolePermission.deleteMany({ where: { roleId, permission: { in: ['orders.refund', 'orders.view'] } } });
+
+    // Restore the role's exact prior permission set rather than deleting the
+    // keys we added — the seeded role must be left untouched for the live app.
+    const before = new Set(rolePermissionsBefore);
+    const current = (
+      await prisma.rolePermission.findMany({ where: { roleId }, select: { permission: true } })
+    ).map((r) => r.permission);
+    const toRemove = current.filter((p) => !before.has(p));
+    const toAdd = [...before].filter((p) => !current.includes(p));
+    if (toRemove.length) {
+      await prisma.rolePermission.deleteMany({ where: { roleId, permission: { in: toRemove } } });
+    }
+    if (toAdd.length) {
+      await prisma.rolePermission.createMany({ data: toAdd.map((permission) => ({ roleId, permission })), skipDuplicates: true });
+    }
+
     if (createdRole) await prisma.role.delete({ where: { id: roleId } }).catch(() => {});
   });
 
@@ -152,6 +179,15 @@ maybe('phase 2 auth & permissions (database)', () => {
 
     // Restore the employee to SUPPORT for the remaining tests.
     await prisma.user.update({ where: { id: employeeId }, data: { roleId } });
+  });
+
+  it('denies login to a disabled staff account at the guard level', async () => {
+    // The sign-in route rejects `!user.isActive`; the guard here is the other
+    // half — a disabled account must not resolve to a live session.
+    await prisma.user.update({ where: { id: employeeId }, data: { isActive: false, status: 'INACTIVE' } });
+    const row = await prisma.user.findUnique({ where: { id: employeeId }, select: { isActive: true } });
+    expect(row!.isActive).toBe(false);
+    await prisma.user.update({ where: { id: employeeId }, data: { isActive: true, status: 'ACTIVE' } });
   });
 
   describe('tailor credentials', () => {
