@@ -54,6 +54,8 @@ export async function POST(req: NextRequest) {
     email: user.email,
     role: user.role?.name ?? 'CUSTOMER',
     customerId: user.customer?.id ?? null,
+    kind: 'customer',
+    sessionVersion: user.sessionVersion,
   });
 
   if (user.customer?.id) {

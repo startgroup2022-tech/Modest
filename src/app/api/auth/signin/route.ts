@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { signInSchema } from '@/lib/validation';
-import { verifyPassword, setSessionCookie } from '@/lib/auth';
+import { verifyPassword, setSessionCookie, type SessionKind } from '@/lib/auth';
 import { mergeGuestCartInto, mergeGuestWishlistInto } from '@/lib/cart';
 import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
+
+const STAFF_ROLE_NAMES = ['ADMIN', 'MANAGER', 'SUPPORT'];
 
 export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
@@ -35,11 +37,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalidCredentials' }, { status: 401 });
   }
 
+  // Staff roles always mint a staff session, even if the user also happens to
+  // have a customer profile (e.g. an admin who shops). Tailors authenticate
+  // only through the Tailor Portal, so a TAILOR-role user is refused here.
+  const roleName = user.role?.name ?? 'CUSTOMER';
+  if (roleName === 'TAILOR') {
+    return NextResponse.json({ error: 'invalidCredentials' }, { status: 401 });
+  }
+  const kind: SessionKind = STAFF_ROLE_NAMES.includes(roleName) ? 'staff' : 'customer';
+
   await setSessionCookie({
     userId: user.id,
     email: user.email,
-    role: user.role?.name ?? 'CUSTOMER',
+    role: roleName,
     customerId: user.customer?.id ?? null,
+    kind,
+    sessionVersion: user.sessionVersion,
   });
 
   if (user.customer?.id) {

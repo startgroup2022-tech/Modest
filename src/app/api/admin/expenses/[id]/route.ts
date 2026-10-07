@@ -17,7 +17,7 @@ const actionSchema = z
     path: ['approvalNote'],
   });
 
-export const PATCH = adminHandler('expenses.manage', async ({ admin, req }) => {
+export const PATCH = adminHandler(undefined, async ({ admin, req }) => {
   const id = new URL(req.url).pathname.split('/').filter(Boolean).pop()!;
   const existing = await prisma.expense.findUnique({ where: { id } });
   if (!existing) throw new AdminActionError('Expense not found', 'NOT_FOUND', 404);
@@ -35,6 +35,15 @@ export const PATCH = adminHandler('expenses.manage', async ({ admin, req }) => {
     const { action, approvalNote } = parsed.data;
     const target = { submit: 'SUBMITTED', approve: 'APPROVED', reject: 'REJECTED', pay: 'PAID' } as const;
     const next = target[action];
+    // Approving and rejecting are a distinct authority from day-to-day expense
+    // management; submit/pay require `expenses.manage`.
+    if (action === 'approve' || action === 'reject') {
+      if (!admin.permissions.has('expenses.approve')) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+    } else if (!admin.permissions.has('expenses.manage')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
     // Enforce the workflow server-side: no paying an unapproved expense, no
     // re-approving a paid one, no silently resurrecting a rejected expense.
     if (!canTransition(EXPENSE_TRANSITIONS, existing.status, next)) {
@@ -42,9 +51,6 @@ export const PATCH = adminHandler('expenses.manage', async ({ admin, req }) => {
         { error: `Cannot ${action} an expense in ${existing.status} state`, code: 'INVALID_TRANSITION' },
         { status: 409 },
       );
-    }
-    if ((action === 'approve' || action === 'reject') && !admin.permissions.has('finance.approve')) {
-      return NextResponse.json({ error: 'You cannot approve expenses' }, { status: 403 });
     }
     // Separation of duties: nobody approves or rejects their own expense.
     if ((action === 'approve' || action === 'reject') && existing.submittedById === admin.id) {
@@ -87,7 +93,7 @@ export const PATCH = adminHandler('expenses.manage', async ({ admin, req }) => {
   return NextResponse.json({ ok: true, id });
 });
 
-export const DELETE = adminHandler('expenses.manage', async ({ admin, req }) => {
+export const DELETE = adminHandler('expenses.delete', async ({ admin, req }) => {
   const id = new URL(req.url).pathname.split('/').filter(Boolean).pop()!;
   const existing = await prisma.expense.findUnique({ where: { id } });
   if (!existing) throw new AdminActionError('Expense not found', 'NOT_FOUND', 404);

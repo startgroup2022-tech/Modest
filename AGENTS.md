@@ -63,6 +63,35 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   delete routes (coupons, promotions, shipping, pages, content/social,
   content/homepage, redirects). Their forms post there — never add a UI screen
   without its route, or saves silently 404.
+
+## Authentication, RBAC & permissions (Phase 2)
+- Sessions are JWTs in `att_session` (httpOnly). Each token carries a `kind`
+  (`staff` | `customer` | `tailor`) and a `sessionVersion` snapshot. `isStaff`
+  (`src/lib/admin-auth.ts`) refuses any token whose kind is not `staff`, so a
+  tailor or customer cookie can never satisfy an admin guard.
+- Effective permissions = `(role grants ∪ ALLOW overrides) \ DENY overrides`.
+  Role templates live in `RolePermission`; per-employee deltas in
+  `UserPermission` (`src/lib/permissions.ts#resolveEffectivePermissions`). Two
+  employees with the same role can therefore hold different permissions. A
+  job title is never consulted for authorization.
+- Changing a user's role, status, password, or permission overrides calls
+  `bumpSessionVersion` (`src/lib/auth.ts`); `getCurrentUser` rejects a token
+  whose embedded version is stale, so revocation is immediate.
+- Privilege-escalation guard: `forbiddenGrants` stops a non-super-admin
+  (non-ADMIN) from granting a permission they do not themselves hold. Applied
+  in `PUT /api/admin/employees/[id]/permissions`, the employee create/update
+  routes, and `PATCH /api/admin/roles/[id]`. Self-lockout (disabling or
+  demoting yourself, or stripping your own `users.manage`) is refused.
+- Tailors authenticate through a separate `TailorCredential` (bcrypt hash only)
+  and `att_tailor` cookie; an admin issues a one-time temporary password via
+  `POST /api/admin/tailors/[id]/credentials` (returned once, never persisted).
+  Login enforces a persistent lockout (`failedLoginAttempts` / `lockedUntil`).
+  The first-login password change is at `/[locale]/tailor/password`.
+- Supervisor viewing is read-only: `buildSupervisorContext` /
+  `canActAsTailor` (`src/lib/tailor-auth.ts`) keep the supervisor's own identity
+  and refuse tailor write actions — never impersonate the tailor.
+
+## Admin resources → storefront
 - Admin Promotions drive the storefront: `placement: "announcement"` renders the
   dismissible `AnnouncementBar` in the storefront layout; `placement: "home_banner"`
   renders an editorial section on the homepage.

@@ -33,7 +33,7 @@ export const getBadgeCounts = cache(async (permissions: Set<Permission>, userId:
     permissions.has('qc.view')
       ? prisma.qcRecord.count({ where: { status: 'PENDING' } })
       : 0,
-    permissions.has('finance.approve')
+    permissions.has('expenses.approve')
       ? prisma.expense.count({ where: { status: 'SUBMITTED' } })
       : 0,
     permissions.has('orders.refund')

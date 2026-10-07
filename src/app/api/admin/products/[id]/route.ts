@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
-import { productSchema } from '../route';
+import { productSchema } from '@/lib/admin/product-schema';
 
 export const dynamic = 'force-dynamic';
 

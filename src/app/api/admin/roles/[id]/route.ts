@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { adminHandler, AdminActionError } from '@/lib/admin-auth';
+import { adminHandler, AdminActionError, isSuperAdmin } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
-import { isPermission } from '@/lib/permission-defs';
+import { isPermission, forbiddenGrants } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +18,17 @@ export const PATCH = adminHandler('roles.manage', async ({ admin, req }) => {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Invalid request' }, { status: 422 });
   const valid = parsed.data.permissions.filter(isPermission);
+
+  // A non-super-admin cannot widen a role template beyond their own authority.
+  if (!isSuperAdmin(admin)) {
+    const forbidden = forbiddenGrants(admin, valid);
+    if (forbidden.length) {
+      return NextResponse.json(
+        { error: 'You cannot grant permissions you do not hold', code: 'PRIVILEGE_ESCALATION', permissions: forbidden },
+        { status: 403 },
+      );
+    }
+  }
 
   await prisma.$transaction([
     prisma.rolePermission.deleteMany({ where: { roleId: id } }),

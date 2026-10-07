@@ -53,6 +53,28 @@ model RolePermission {
   @@index([roleId])
 }
 
+// Employee-specific permission overrides. Effective permissions are resolved as
+// (role permissions ∪ ALLOW overrides) \ DENY overrides, so two employees with
+// the same job title can hold different permissions. The job title is never
+// consulted for authorization.
+enum PermissionEffect {
+  ALLOW
+  DENY
+}
+
+model UserPermission {
+  id         String           @id @default(cuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission String
+  effect     PermissionEffect @default(ALLOW)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([userId, permission])
+  @@index([userId])
+}
+
 model User {
   id                     String              @id @default(cuid())
   email                  String              @unique
@@ -69,6 +91,11 @@ model User {
   isActive               Boolean             @default(true)
   locale                 String              @default("en")
   lastLoginAt            DateTime?
+  // Bumped whenever the account is disabled, its permissions change, or its
+  // role changes. The value is embedded in the session JWT; a mismatch on the
+  // next authenticated request invalidates that session immediately.
+  sessionVersion         Int                 @default(0)
+  permissionOverrides    UserPermission[]
   customer               Customer?
   auditLogs              AuditLog[]
   staffNotifications     StaffNotification[]
@@ -996,6 +1023,9 @@ model Tailor {
 // Authentication material for the future Tailor Portal. The password is only
 // ever stored as a bcrypt hash; `mustChangePassword` supports the
 // temporary-password flow and is cleared once the tailor sets their own.
+// Tailors never self-register: an authorised admin issues the initial
+// credentials. `sessionVersion` invalidates live sessions the moment an admin
+// disables the account or resets the password.
 model TailorCredential {
   id                  String    @id @default(cuid())
   tailorId            String    @unique
@@ -1007,6 +1037,11 @@ model TailorCredential {
   credentialsSentAt   DateTime?
   lastPasswordChangeAt DateTime?
   lastLoginAt         DateTime?
+  sessionVersion      Int       @default(0)
+  // Brute-force protection. Persisted (not in-memory) so a restart cannot clear
+  // an in-progress lockout.
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

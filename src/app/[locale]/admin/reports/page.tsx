@@ -26,7 +26,10 @@ export default async function ReportsPage({
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
-  await requireAdminPage('reports.view', locale);
+  const admin = await requireAdminPage('reports.view', locale);
+  // Net revenue is derived from costs and refunds; it is gated behind a
+  // dedicated profit permission rather than the general report permission.
+  const canSeeProfits = admin.permissions.has('reports.profits');
   const dict = getAdminDict(locale);
   const sp = await searchParams;
   const range = resolveRange({ range: sp.range, from: sp.from, to: sp.to });
@@ -75,7 +78,7 @@ export default async function ReportsPage({
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label={dict.dashboard.revenue} value={formatBhd(grossBhd, locale)} hint={`${formatNumber(revenueOrders.length, locale)} ${dict.nav.orders}`} />
-        <Kpi label={dict.finance.netRevenue} value={formatBhd(netBhd, locale)} tone={netBhd >= 0 ? 'success' : 'danger'} />
+        {canSeeProfits && <Kpi label={dict.finance.netRevenue} value={formatBhd(netBhd, locale)} tone={netBhd >= 0 ? 'success' : 'danger'} />}
         <Kpi label={dict.dashboard.unitsSold} value={formatNumber(units, locale)} />
         <Kpi label={dict.dashboard.customers} value={formatNumber(customerAgg, locale)} />
       </div>
@@ -83,7 +86,7 @@ export default async function ReportsPage({
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <Kpi label={dict.dashboard.discounts} value={formatBhd(discountBhd, locale)} tone="warn" />
         <Kpi label={dict.finance.refunds} value={formatBhd(refundsBhd, locale)} tone="danger" />
-        <Kpi label={dict.dashboard.expenses} value={formatBhd(expensesBhd, locale)} />
+        {canSeeProfits && <Kpi label={dict.dashboard.expenses} value={formatBhd(expensesBhd, locale)} />}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

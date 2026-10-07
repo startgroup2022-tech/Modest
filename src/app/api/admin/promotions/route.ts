@@ -22,7 +22,7 @@ const schema = z.object({
   isActive: z.boolean().default(true),
 });
 
-export const POST = adminHandler('content.edit', async ({ admin, req }) => {
+export const POST = adminHandler('promotions.create', async ({ admin, req }) => {
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Validation failed' }, { status: 422 });

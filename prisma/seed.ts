@@ -453,6 +453,7 @@ async function main() {
     { name: 'MANAGER' as const, description: 'Catalogue & orders' },
     { name: 'SUPPORT' as const, description: 'Orders & customers' },
     { name: 'CUSTOMER' as const, description: 'Storefront customer' },
+    { name: 'TAILOR' as const, description: 'Tailor Portal (separate credential)' },
   ];
   const roles: Record<string, string> = {};
   for (const r of roleDefs) {

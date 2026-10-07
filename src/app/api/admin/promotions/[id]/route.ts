@@ -22,7 +22,7 @@ const schema = z.object({
   isActive: z.boolean().default(true),
 });
 
-export const PATCH = adminHandler('content.edit', async ({ admin, req }) => {
+export const PATCH = adminHandler('promotions.edit', async ({ admin, req }) => {
   const id = new URL(req.url).pathname.split('/').filter(Boolean).pop()!;
   const existing = await prisma.promotion.findUnique({ where: { id } });
   if (!existing) throw new AdminActionError('Promotion not found', 'NOT_FOUND', 404);
@@ -52,7 +52,7 @@ export const PATCH = adminHandler('content.edit', async ({ admin, req }) => {
   return NextResponse.json({ ok: true, id });
 });
 
-export const DELETE = adminHandler('content.edit', async ({ admin, req }) => {
+export const DELETE = adminHandler('promotions.edit', async ({ admin, req }) => {
   const id = new URL(req.url).pathname.split('/').filter(Boolean).pop()!;
   const existing = await prisma.promotion.findUnique({ where: { id } });
   if (!existing) throw new AdminActionError('Promotion not found', 'NOT_FOUND', 404);
