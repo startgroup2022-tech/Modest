@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { adminHandler } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
-import { nextSequenceStandalone } from '@/lib/sequences';
+import { nextSequence } from '@/lib/sequences';
 import { resolveTailorFee, TailorFeeError } from '@/lib/tailor-fees';
 import { assertOrderSettledForProduction } from '@/lib/production-gate';
+import { applyAssignmentSideEffects } from '@/lib/assignments';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,34 +73,49 @@ export const POST = adminHandler('production.manage', async ({ admin, req }) => 
   }
 
   const due = d.dueDate ? new Date(d.dueDate) : null;
-  const code = await nextSequenceStandalone({ key: 'production', prefix: 'PRD', pad: 6 });
-  const task = await prisma.productionTask.create({
-    data: {
-      code,
-      orderId: d.orderId,
-      orderItemId: d.orderItemId || null,
-      productId: d.productId || null,
+
+  // Creating a task and its assignment side-effects (order-item mirror + the
+  // tailor's `production.assigned` notification) happen in one transaction, so a
+  // notification can never be emitted for a task that did not commit.
+  const task = await prisma.$transaction(async (tx) => {
+    const code = await nextSequence(tx, { key: 'production', prefix: 'PRD', pad: 6 });
+    const created = await tx.productionTask.create({
+      data: {
+        code,
+        orderId: d.orderId,
+        orderItemId: d.orderItemId || null,
+        productId: d.productId || null,
+        tailorId: d.tailorId || null,
+        titleEn: d.titleEn,
+        titleAr: d.titleAr || null,
+        priority: d.priority,
+        status: d.tailorId ? 'ASSIGNED' : 'PENDING',
+        feeBhd,
+        dueDate: due && !Number.isNaN(due.getTime()) ? due : null,
+        notes: d.notes || null,
+        createdById: admin.id,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: { userId: admin.id, action: 'production.create', entity: 'ProductionTask', entityId: created.id, metadata: { orderId: d.orderId, feeBhd } as never },
+    });
+
+    // Mirror the assignment onto the order item and tell the tailor. The helper
+    // is the single emission point shared with the per-piece service.
+    await applyAssignmentSideEffects(tx, {
+      taskId: created.id,
+      taskCode: created.code,
       tailorId: d.tailorId || null,
+      previousTailorId: null,
+      orderItemId: d.orderItemId || null,
+      feeBhd: d.tailorId ? feeBhd : null,
       titleEn: d.titleEn,
       titleAr: d.titleAr || null,
-      priority: d.priority,
-      status: d.tailorId ? 'ASSIGNED' : 'PENDING',
-      feeBhd,
-      dueDate: due && !Number.isNaN(due.getTime()) ? due : null,
-      notes: d.notes || null,
-      createdById: admin.id,
-    },
+    });
+
+    return created;
   });
 
-  // Mirror the assignment onto the order item so per-piece assignment and the
-  // frozen fee are consistent across production and settlements.
-  if (d.orderItemId && d.tailorId && feeBhd != null) {
-    await prisma.orderItem.update({
-      where: { id: d.orderItemId },
-      data: { assignedTailorId: d.tailorId, assignedAt: new Date(), tailorFeeBhd: feeBhd },
-    });
-  }
-
-  await prisma.auditLog.create({ data: { userId: admin.id, action: 'production.create', entity: 'ProductionTask', entityId: task.id, metadata: { orderId: d.orderId, feeBhd } as never } });
   return NextResponse.json({ ok: true, id: task.id, code: task.code });
 });

@@ -4,6 +4,7 @@ import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
 import { PRODUCTION_TRANSITIONS, canTransition } from '@/lib/workflow';
 import { assertOrderSettledForProduction } from '@/lib/production-gate';
+import { assignTailorToProductionTask, AssignmentError } from '@/lib/assignments';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,18 +36,43 @@ export const PATCH = adminHandler('production.manage', async ({ admin, req }) =>
     return NextResponse.json({ error: 'You cannot assign tailors', code: 'ASSIGN_FORBIDDEN' }, { status: 403 });
   }
 
+  // (Re)assignment is a domain operation with side-effects (order-item mirror
+  // plus the tailor's `production.assigned` notification). Delegate to the
+  // service so the queue path and per-piece path share one rule set and the
+  // notification is emitted exactly once, to the new tailor only.
+  if (d.action === 'assign') {
+    if (d.notes !== undefined) {
+      await prisma.productionTask.update({ where: { id }, data: { notes: d.notes || null } });
+    }
+    if (d.tailorId !== task.tailorId) {
+      try {
+        const { task: updated } = await assignTailorToProductionTask({
+          taskId: id,
+          tailorId: d.tailorId ?? null,
+          actorId: admin.id,
+        });
+        return NextResponse.json({ ok: true, id, status: updated.status });
+      } catch (err) {
+        if (err instanceof AssignmentError) {
+          return NextResponse.json({ error: err.message, code: err.code }, { status: 409 });
+        }
+        throw err;
+      }
+    }
+    return NextResponse.json({ ok: true, id, status: task.status });
+  }
+
   // Resolve the status this action would produce, then validate the edge.
   let target: string | null = null;
-  if (d.action === 'assign') target = d.tailorId ? 'ASSIGNED' : 'PENDING';
-  else if (d.action === 'start') target = 'IN_PROGRESS';
+  if (d.action === 'start') target = 'IN_PROGRESS';
   else if (d.action === 'complete') target = 'COMPLETED';
   else if (d.action === 'rework') target = 'REWORK';
   else if (d.action === 'cancel') target = 'CANCELLED';
 
-  // Starting or (re)assigning production work requires a captured payment. A
-  // task that was created before this rule existed, or one whose payment was
-  // never confirmed, cannot be started from the queue either.
-  if (d.action === 'start' || (d.action === 'assign' && d.tailorId)) {
+  // Starting production requires a captured payment. A task that was created
+  // before this rule existed, or one whose payment was never confirmed, cannot
+  // be started from the queue either.
+  if (d.action === 'start') {
     try {
       await assertOrderSettledForProduction(task.orderId);
     } catch {
@@ -66,7 +92,7 @@ export const PATCH = adminHandler('production.manage', async ({ admin, req }) =>
     }
   } else if (task.status === 'CANCELLED' || task.status === 'COMPLETED') {
     // No cosmetic edits to a finished/cancelled task.
-    if (d.priority !== undefined || d.dueDate !== undefined) {
+    if (d.priority !== undefined || d.dueDate !== undefined || d.notes !== undefined) {
       return NextResponse.json(
         { error: `Cannot edit a task in ${task.status} state`, code: 'INVALID_TRANSITION' },
         { status: 409 },
@@ -75,10 +101,6 @@ export const PATCH = adminHandler('production.manage', async ({ admin, req }) =>
   }
 
   switch (d.action) {
-    case 'assign':
-      data.tailorId = d.tailorId ?? null;
-      data.status = d.tailorId ? 'ASSIGNED' : 'PENDING';
-      break;
     case 'start':
       data.status = 'IN_PROGRESS';
       data.startedAt = new Date();

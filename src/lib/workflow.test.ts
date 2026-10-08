@@ -62,14 +62,20 @@ describe('settlement workflow', () => {
   it('requires approval before payment', () => {
     expect(canTransition(SETTLEMENT_TRANSITIONS, 'PENDING', 'PAID')).toBe(false);
     expect(canTransition(SETTLEMENT_TRANSITIONS, 'PENDING', 'APPROVED')).toBe(true);
-    expect(canTransition(SETTLEMENT_TRANSITIONS, 'APPROVED', 'PAID')).toBe(true);
+    // Payout must not skip the transfer step.
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'APPROVED', 'PAID')).toBe(false);
   });
 
-  it('supports transfer proof and tailor confirmation', () => {
+  it('enforces the strict chain APPROVED → TRANSFERRED → PAID → CONFIRMED', () => {
     expect(canTransition(SETTLEMENT_TRANSITIONS, 'APPROVED', 'TRANSFERRED')).toBe(true);
-    expect(canTransition(SETTLEMENT_TRANSITIONS, 'TRANSFERRED', 'CONFIRMED')).toBe(true);
-    expect(canTransition(SETTLEMENT_TRANSITIONS, 'PAID', 'CONFIRMED')).toBe(true);
     expect(canTransition(SETTLEMENT_TRANSITIONS, 'TRANSFERRED', 'PAID')).toBe(true);
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'PAID', 'CONFIRMED')).toBe(true);
+  });
+
+  it('never lets a tailor confirm before the payout is recorded', () => {
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'TRANSFERRED', 'CONFIRMED')).toBe(false);
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'APPROVED', 'CONFIRMED')).toBe(false);
+    expect(canTransition(SETTLEMENT_TRANSITIONS, 'PENDING', 'CONFIRMED')).toBe(false);
   });
 
   it('cannot pay the same settlement twice', () => {

@@ -6,18 +6,25 @@ import { getAdminDict } from '@/i18n/admin-dict';
 import { isLocale, type Locale } from '@/i18n/config';
 import { formatBhd, formatDate, formatDateTime, formatNumber, label } from '@/lib/admin-format';
 import { PageHeader, Panel, Kpi, StatusBadge, AdminEmpty } from '@/components/admin/ui';
+import { ProductionTaskActions } from '@/components/admin/ProductionTaskActions';
+import { PRODUCTION_TRANSITIONS } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Production', robots: { index: false, follow: false } };
 
 const PRIORITY_TONE: Record<string, string> = { URGENT: 'adm-badge-danger', HIGH: 'adm-badge-warn', NORMAL: 'adm-badge-info', LOW: 'adm-badge-neutral' };
 
+/** Actions offered per state, mirroring the API's workflow map. */
+const ACTION_TARGETS = ['IN_PROGRESS', 'COMPLETED', 'REWORK', 'CANCELLED'];
+
 export default async function ProductionPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
-  await requireAdminPage('production.view', locale);
+  const admin = await requireAdminPage('production.view', locale);
   const dict = getAdminDict(locale);
+  const canManage = admin.permissions.has('production.manage');
+  const canAssign = admin.permissions.has('orders.assign');
 
   const [tasks, tailors, counts] = await Promise.all([
     prisma.productionTask.findMany({
@@ -55,6 +62,7 @@ export default async function ProductionPage({ params }: { params: Promise<{ loc
                   <th>{dict.production.priority}</th>
                   <th>{dict.production.dueDate}</th>
                   <th>{dict.common.status}</th>
+                  <th>{locale === 'ar' ? 'إجراءات' : 'Actions'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -77,6 +85,19 @@ export default async function ProductionPage({ params }: { params: Promise<{ loc
                         {t.dueDate ? formatDate(t.dueDate, locale) : '\u2014'}
                       </td>
                       <td data-label={dict.common.status}><StatusBadge status={t.status} /></td>
+                      <td data-label={locale === 'ar' ? 'إجراءات' : 'Actions'}>
+                        <ProductionTaskActions
+                          taskId={t.id}
+                          tailorId={t.tailorId}
+                          priority={t.priority}
+                          dueDate={t.dueDate ? t.dueDate.toISOString() : null}
+                          tailors={tailors.map((tt) => ({ id: tt.id, name: locale === 'ar' ? tt.nameAr : tt.nameEn }))}
+                          transitions={(PRODUCTION_TRANSITIONS[t.status] ?? []).filter((to) => ACTION_TARGETS.includes(to))}
+                          canAssign={canAssign}
+                          canManage={canManage}
+                          locale={locale}
+                        />
+                      </td>
                     </tr>
                   );
                 })}

@@ -239,6 +239,55 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   clamped to the subtotal). It never rewrites per-line prices, and the final
   amounts are persisted inside the order transaction.
 
+## Tailor Portal, production & QC (Phase 6A)
+- The portal has its own principal: `resolveTailorAccess` / `resolveTailorApiPrincipal`
+  (`src/lib/tailor-principal.ts`) return either the signed-in tailor (read+write,
+  own work only) or a staff **read-only supervisor** (`?tailorId=` plus
+  `tailors.view`). Every write path goes through `guardTailorWrite`, which also
+  enforces the origin/CSRF check; a supervisor is refused structurally
+  (`SUPERVISOR_READ_ONLY`) — never impersonate the tailor.
+- Server layouts/pages read the request URL from the `x-pathname` header. It
+  **includes the query string** (`middleware.ts` stamps `${pathname}${search}`)
+  because a layout cannot receive `searchParams` as a prop; without this the
+  supervisor `?tailorId=` never reaches the layout.
+- `src/lib/tailor-work.ts` is the portal read/write service. Reads use explicit
+  allow-list projections — customer money (order totals, item prices, payments,
+  profit) is never selected, so it cannot leak into the portal. Ownership is
+  enforced by scoping every query to `tailorId`; a task that is not yours is
+  indistinguishable from one that does not exist.
+- Settlement payout is a **strict, no-skip chain**: `APPROVED → TRANSFERRED`
+  (transfer proof URL **or** reference mandatory) `→ PAID → CONFIRMED`
+  (`SETTLEMENT_TRANSITIONS` in `src/lib/workflow.ts`). `applySettlementAction`
+  refuses `APPROVED → PAID`, and `pay` re-checks `status === 'TRANSFERRED'`.
+  Only the tailor may confirm (`confirmSettlementByTailor`), and only after PAID;
+  a supervisor can never confirm.
+- Paying a settlement raises exactly one `TAILOR_DUE` `Expense` in the same
+  transaction, linked via the unique `TailorSettlement.expenseId`
+  (`ensureSettlementExpense`), so a retried payout cannot double-count dues. The
+  system category is resolved by the stable `ExpenseCategoryType` (`TAILOR_DUE`),
+  never by display name.
+- Tailor notifications live in `TailorNotification` (a tailor is not a `User`).
+  Delivery honours a `NotificationRule` with `targetType = TAILOR`: an inactive
+  rule for the event suppresses the row, a missing rule delivers it
+  (`src/lib/tailor-notifications.ts`). Assignment and QC both emit them.
+- Assignment side-effects have exactly one home: `applyAssignmentSideEffects`
+  (`src/lib/assignments.ts`). Both the per-piece service (`assignTailorToItem`)
+  and the admin production API (`POST /api/admin/production`,
+  `assignTailorToProductionTask` from the queue's reassign action) funnel
+  through it inside their own transaction, so the `production.assigned`
+  notification is emitted exactly once, to the new tailor only, and never for a
+  failed/rolled-back or same-tailor re-assignment. The helper also re-points the
+  order item's `assignedTailorId` on every change, so a reassigned piece can
+  never stay settle-payable to the tailor who lost it.
+- QC requires a rejection reason whenever the result is not `PASSED`, and only
+  runs on `QC_ALLOWED_STATES`. A PASS sets the task `COMPLETED`, otherwise
+  `REWORK`; the tailor sees the reason in the portal.
+- `/en/tailor/` and `/ar/tailor/` are `noindex` and disallowed in `robots.ts`.
+- Admin-side controls: `ProductionTaskActions` (reassign/priority/due/workflow,
+  `production.manage`; reassignment also needs `orders.assign`) and
+  `SettlementRowActions` (the payout chain, `settlements.manage`) live on the
+  production and settlements pages.
+
 ## Deployment
 - cPanel target: see `DEPLOYMENT.md`. Entry point is `server.js` (Passenger).
 - Baseline Prisma migration is committed at `prisma/migrations/0_init`.

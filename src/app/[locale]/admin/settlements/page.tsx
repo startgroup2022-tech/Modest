@@ -9,6 +9,7 @@ import { PageHeader, Panel, Kpi, StatusBadge, AdminEmpty } from '@/components/ad
 
 import { Drawer } from '@/components/admin/Filters';
 import { SettlementForm } from '@/components/admin/SettlementForm';
+import { SettlementRowActions } from '@/components/admin/SettlementRowActions';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Tailor Settlements', robots: { index: false, follow: false } };
@@ -17,8 +18,9 @@ export default async function SettlementsPage({ params }: { params: Promise<{ lo
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
-  await requireAdminPage('settlements.view', locale);
+  const admin = await requireAdminPage('settlements.view', locale);
   const dict = getAdminDict(locale);
+  const canManage = admin.permissions.has('settlements.manage');
 
   const [settlements, tailors] = await Promise.all([
     prisma.tailorSettlement.findMany({ orderBy: { createdAt: 'desc' }, take: 100, include: { tailor: true } }),
@@ -64,6 +66,7 @@ export default async function SettlementsPage({ params }: { params: Promise<{ lo
                   <th className="text-end">{dict.finance.gross}</th>
                   <th className="text-end">{dict.finance.net}</th>
                   <th>{dict.common.status}</th>
+                  <th>{locale === 'ar' ? 'إجراءات' : 'Actions'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -75,6 +78,9 @@ export default async function SettlementsPage({ params }: { params: Promise<{ lo
                     <td data-label={dict.finance.gross} className="adm-num text-end">{formatBhd(s.grossBhd, locale)}</td>
                     <td data-label={dict.finance.net} className="adm-num text-end text-ink">{formatBhd(s.netBhd, locale)}</td>
                     <td data-label={dict.common.status}><StatusBadge status={s.status} /></td>
+                    <td data-label={locale === 'ar' ? 'إجراءات' : 'Actions'}>
+                      <SettlementRowActions settlementId={s.id} status={s.status} canManage={canManage} locale={locale} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -79,9 +79,14 @@ export function TailorPasswordForm({
       </header>
 
       {done ? (
-        <p className="border border-success bg-paper p-4 text-small text-ink">
-          {ar ? 'تم تحديث كلمة المرور بنجاح.' : 'Your password has been updated.'}
-        </p>
+        <div className="space-y-4">
+          <p className="border border-success bg-paper p-4 text-small text-ink">
+            {ar ? 'تم تحديث كلمة المرور بنجاح.' : 'Your password has been updated.'}
+          </p>
+          <a href={`/${locale}/tailor`} className="btn-primary btn-block text-center">
+            {ar ? 'متابعة إلى بوابة الخياطين' : 'Continue to the Tailor Portal'}
+          </a>
+        </div>
       ) : (
         <form onSubmit={submit} className="space-y-5" noValidate>
           <div>

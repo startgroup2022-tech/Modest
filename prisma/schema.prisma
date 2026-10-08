@@ -1117,6 +1117,7 @@ model Tailor {
   settlements    TailorSettlement[]
   assignments    OrderItem[]        @relation("TailorAssignments")
   qcRecords      QcRecord[]
+  notifications  TailorNotification[]
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
@@ -1276,6 +1277,9 @@ model TailorSettlement {
   transferReference   String?
   transferredAt       DateTime?
   confirmedByTailorAt DateTime?
+  // The TAILOR_DUE expense raised when this settlement is paid. Unique so a
+  // payout can never create a second accounting entry, even under a retry.
+  expenseId           String?                @unique
   approvedById        String?
   approvedBy          User?                  @relation("SettlementApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt          DateTime?
@@ -1407,6 +1411,35 @@ model StaffNotification {
   createdAt DateTime              @default(now())
 
   @@index([userId, readAt])
+  @@index([createdAt])
+}
+
+// ───────────────────────────────────────────────────────────
+// Tailor notifications
+// ───────────────────────────────────────────────────────────
+
+// A tailor is a separate principal from staff and customers, so tailor
+// notifications live in their own table. `StaffNotification.userId` is a FK to
+// `User`; a tailor has no `User`, so reusing that table would be a type lie.
+// `eventKey` mirrors `NotificationRule.eventKey` so delivery rules can be
+// configured once and consulted here.
+model TailorNotification {
+  id        String    @id @default(cuid())
+  tailorId  String
+  tailor    Tailor    @relation(fields: [tailorId], references: [id], onDelete: Cascade)
+  // NotificationRule.eventKey this was raised for (e.g. qc.failed).
+  eventKey  String?
+  titleEn   String
+  titleAr   String
+  bodyEn    String?   @db.Text
+  bodyAr    String?   @db.Text
+  // Locale-less portal path (e.g. /tailor/tasks/{id}); the portal prefixes the
+  // active locale, mirroring the customer Notification convention.
+  href      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tailorId, readAt])
   @@index([createdAt])
 }
 

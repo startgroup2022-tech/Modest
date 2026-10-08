@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
 import { QC_ALLOWED_STATES } from '@/lib/workflow';
+import { notifyTailorQc } from '@/lib/tailor-notifications';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,6 +78,20 @@ export const POST = adminHandler('qc.manage', async ({ admin, req }) => {
         completedAt: d.status === 'PASSED' ? new Date() : null,
       },
     });
+    // The tailor who worked the piece is told the outcome, including the
+    // mandatory rejection reason so rework is actionable from the portal.
+    if (task.tailorId) {
+      await notifyTailorQc(
+        {
+          tailorId: task.tailorId,
+          taskId: task.id,
+          taskCode: task.code,
+          passed: d.status === 'PASSED',
+          reason: d.status === 'PASSED' ? null : d.rejectionReason.trim(),
+        },
+        tx,
+      );
+    }
     return rec;
   });
 

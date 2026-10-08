@@ -31,11 +31,17 @@ export const PRODUCTION_TRANSITIONS: Record<string, readonly string[]> = {
   CANCELLED: [],
 };
 
-/** Tailor settlement lifecycle, including transfer proof and tailor confirmation. */
+/**
+ * Tailor settlement lifecycle.
+ *
+ * Payout may not skip the transfer step: the only path to PAID is through
+ * TRANSFERRED, which itself requires a recorded transfer proof. The chain is
+ * APPROVED → TRANSFERRED → PAID → CONFIRMED.
+ */
 export const SETTLEMENT_TRANSITIONS: Record<string, readonly string[]> = {
   PENDING: ['APPROVED', 'CANCELLED'],
-  APPROVED: ['TRANSFERRED', 'PAID', 'CANCELLED'],
-  TRANSFERRED: ['PAID', 'CONFIRMED', 'CANCELLED'],
+  APPROVED: ['TRANSFERRED', 'CANCELLED'],
+  TRANSFERRED: ['PAID', 'CANCELLED'],
   PAID: ['CONFIRMED'],
   CONFIRMED: [],
   CANCELLED: [],

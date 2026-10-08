@@ -27,7 +27,10 @@ export function TailorSignInForm({ locale }: { locale: 'en' | 'ar' }) {
         setError(out.error ?? (ar ? 'تعذّر تسجيل الدخول' : 'Sign-in failed'));
         return;
       }
-      router.push(`/${locale}${out.redirect === '/tailor' ? '/tailor/password' : '/tailor/password'}`);
+      // Honour the server's destination: a tailor still on a temporary password
+      // is sent to the password screen; everyone else lands in the portal.
+      const destination = out.redirect === '/tailor' ? '/tailor' : '/tailor/password';
+      router.push(`/${locale}${destination}`);
       router.refresh();
     } catch {
       setError(ar ? 'خطأ في الشبكة' : 'Network error');

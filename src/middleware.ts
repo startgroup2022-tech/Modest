@@ -30,7 +30,11 @@ export async function middleware(request: NextRequest) {
   if (isLocale(first)) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-locale', first);
-    requestHeaders.set('x-pathname', pathname);
+    // Include the query string: server layouts/pages read the full request URL
+    // from this header (e.g. the Tailor Portal's read-only supervisor view,
+    // which is selected by `?tailorId=`), and a layout cannot receive
+    // searchParams as a prop.
+    requestHeaders.set('x-pathname', `${pathname}${request.nextUrl.search}`);
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 

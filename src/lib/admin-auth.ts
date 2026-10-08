@@ -5,6 +5,10 @@ import { getCurrentUser, type CurrentUser } from './auth';
 import { prisma } from './prisma';
 import { getEffectivePermissions, type Permission } from './permissions';
 import { writeAudit } from './audit';
+import { isSameOriginRequest, CSRF_ERROR } from './csrf';
+
+/** HTTP methods that never change state, so origin checks do not apply. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export interface AdminUser extends CurrentUser {
   /** Effective permissions: role grants merged with per-employee overrides. */
@@ -79,6 +83,11 @@ export function adminHandler(
   return async (req: Request): Promise<NextResponse> => {
     const { admin, error } = await guardApi(permission);
     if (error || !admin) return error!;
+    // Cookie-authenticated writes must come from our own origin. SameSite=Lax
+    // is the primary defence; this is the explicit check on top of it.
+    if (!SAFE_METHODS.has(req.method.toUpperCase()) && !isSameOriginRequest(req)) {
+      return NextResponse.json({ error: CSRF_ERROR, code: 'CSRF_BLOCKED' }, { status: 403 });
+    }
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
     try {
       const url = new URL(req.url);
