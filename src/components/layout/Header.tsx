@@ -63,6 +63,11 @@ export function Header({
     { label: dict.nav.sizeGuide, path: p('size-guide') },
   ];
 
+  // Desktop balances the bar around a centred wordmark: the first three links
+  // sit on one side, the remaining links plus the utility icons on the other.
+  const navLeft = primary.slice(0, 3);
+  const navRight = primary.slice(3);
+
   return (
     <>
       <header
@@ -71,7 +76,7 @@ export function Header({
           scrolled ? 'border-line bg-paper/95 backdrop-blur-sm' : 'border-transparent bg-paper',
         )}
       >
-        <div className="shell flex h-[var(--header-h)] items-center justify-between gap-4">
+        <div className="shell relative flex h-[var(--header-h)] items-center justify-between gap-4">
           {/* Mobile: menu */}
           <button
             type="button"
@@ -83,66 +88,83 @@ export function Header({
             <MenuIcon className="h-5 w-5" />
           </button>
 
-          {/* Desktop: nav (left) */}
-          <nav aria-label="Primary" className="hidden flex-1 items-center gap-7 lg:flex">
-            {primary.map((item) => (
-              <Link
-                key={item.label}
-                href={item.path}
-                className="link-underline text-nav uppercase text-ink transition-opacity hover:opacity-70"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
-          {/* Logo — centred on mobile, left on desktop */}
-          <div className="flex flex-1 justify-center lg:flex-none lg:justify-start">
+          {/* Logo — centred on mobile; absolutely centred on desktop so the two
+              nav groups can balance around it. */}
+          <div className="flex flex-1 justify-center lg:absolute lg:start-1/2 lg:top-1/2 lg:flex-none lg:-translate-x-1/2 lg:-translate-y-1/2 rtl:lg:translate-x-1/2">
             <Logo href={p('')} logoUrl={logoUrl} />
           </div>
 
-          {/* Utilities */}
-          <div className="flex flex-1 items-center justify-end gap-1 sm:gap-2">
-            <button
-              type="button"
-              onClick={() => setSearchOpen(true)}
-              aria-label={dict.util.search}
-              className="flex h-10 w-10 items-center justify-center transition-opacity hover:opacity-60"
-            >
-              <SearchIcon className="h-5 w-5" />
-            </button>
-            <Link
-              href={p('wishlist')}
-              aria-label={dict.util.wishlist}
-              className="relative hidden h-10 w-10 items-center justify-center transition-opacity hover:opacity-60 sm:flex"
-            >
-              <HeartIcon className="h-5 w-5" filled={wishlist.length > 0} />
-              {wishlist.length > 0 ? (
-                <span className="absolute end-1 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[9px] font-medium leading-none text-paper">
-                  {wishlist.length}
-                </span>
-              ) : null}
-            </Link>
-            <Link
-              href={p('account')}
-              aria-label={dict.util.account}
-              className="flex h-10 w-10 items-center justify-center transition-opacity hover:opacity-60"
-            >
-              <UserIcon className="h-5 w-5" />
-            </Link>
-            <button
-              type="button"
-              onClick={() => setCartOpen(true)}
-              aria-label={`${dict.util.cart}${cart.count ? ` (${cart.count})` : ''}`}
-              className="relative flex h-10 w-10 items-center justify-center transition-opacity hover:opacity-60"
-            >
-              <BagIcon className="h-5 w-5" />
-              {cart.count > 0 ? (
-                <span className="absolute end-0.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[9px] font-medium leading-none text-paper">
-                  {cart.count}
-                </span>
-              ) : null}
-            </button>
+          {/* Desktop: left nav + utilities (start side) */}
+          <div className="hidden flex-1 items-center gap-7 lg:flex">
+            <nav aria-label="Primary" className="flex items-center gap-7">
+              {navLeft.map((item) => (
+                <Link
+                  key={item.label}
+                  href={item.path}
+                  className="link-underline text-nav uppercase text-ink transition-opacity hover:opacity-70"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          </div>
+
+          {/* Desktop: right nav + utilities (end side) */}
+          <div className="flex flex-1 items-center justify-end gap-7">
+            <nav aria-label="Primary secondary" className="hidden items-center gap-7 lg:flex">
+              {navRight.map((item) => (
+                <Link
+                  key={item.label}
+                  href={item.path}
+                  className="link-underline text-nav uppercase text-ink transition-opacity hover:opacity-70"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+
+            <div className="flex items-center gap-1 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                aria-label={dict.util.search}
+                className="flex h-10 w-10 items-center justify-center transition-opacity hover:opacity-60"
+              >
+                <SearchIcon className="h-5 w-5" />
+              </button>
+              <Link
+                href={p('wishlist')}
+                aria-label={dict.util.wishlist}
+                className="relative hidden h-10 w-10 items-center justify-center transition-opacity hover:opacity-60 sm:flex"
+              >
+                <HeartIcon className="h-5 w-5" filled={wishlist.length > 0} />
+                {wishlist.length > 0 ? (
+                  <span className="absolute end-1 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[9px] font-medium leading-none text-paper">
+                    {wishlist.length}
+                  </span>
+                ) : null}
+              </Link>
+              <Link
+                href={p('account')}
+                aria-label={dict.util.account}
+                className="flex h-10 w-10 items-center justify-center transition-opacity hover:opacity-60"
+              >
+                <UserIcon className="h-5 w-5" />
+              </Link>
+              <button
+                type="button"
+                onClick={() => setCartOpen(true)}
+                aria-label={`${dict.util.cart}${cart.count ? ` (${cart.count})` : ''}`}
+                className="relative flex h-10 w-10 items-center justify-center transition-opacity hover:opacity-60"
+              >
+                <BagIcon className="h-5 w-5" />
+                {cart.count > 0 ? (
+                  <span className="absolute end-0.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink px-1 text-[9px] font-medium leading-none text-paper">
+                    {cart.count}
+                  </span>
+                ) : null}
+              </button>
+            </div>
           </div>
         </div>
       </header>
