@@ -7,6 +7,7 @@ import { findCouponByCode, buildCouponLines, evaluateCoupon } from '@/lib/coupon
 import { getQualifyingCount } from '@/lib/membership-db';
 import { hashGuestEmail } from '@/lib/tokens';
 import { rateLimit } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,7 @@ const schema = z.object({ code: z.string().trim().min(1).max(60), email: z.strin
  * exact same evaluator, so the preview can never disagree with the charge.
  */
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req);
   const limit = rateLimit(`coupon:${ip}`, 30, 60_000);
   if (!limit.ok) return NextResponse.json({ error: 'Too many attempts' }, { status: 429 });
 

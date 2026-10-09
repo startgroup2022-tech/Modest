@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { addToCart, getCartView, removeCartItem, updateCartItem } from '@/lib/cart';
 import { rateLimit } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ const patchSchema = z.object({
 });
 
 function clientKey(req: NextRequest) {
-  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  return clientIp(req);
 }
 
 export async function GET() {

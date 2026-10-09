@@ -14,6 +14,7 @@ import { isValidTokenFormat } from '@/lib/quick-order';
 import { getCutForProduct } from '@/lib/size-guide-db';
 import { validatePieces, type PieceInput } from '@/lib/measurement-plan';
 import { prisma } from '@/lib/prisma';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,7 +62,7 @@ const bodySchema = z.object({
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req);
   const limit = rateLimit(`quick-order:${ip}`, 12, 60_000);
   if (!limit.ok) return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 });
 

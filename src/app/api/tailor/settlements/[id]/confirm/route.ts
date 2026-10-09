@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { guardTailorWrite, tailorErrorResponse } from '@/lib/tailor-principal';
 import { confirmSettlementByTailor } from '@/lib/settlements';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
     const updated = await confirmSettlementByTailor({
       settlementId: id,
       tailorId: access.tailorId,
-      ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+      ip: clientIp(req),
     });
     return NextResponse.json({ ok: true, status: updated.status });
   } catch (err) {

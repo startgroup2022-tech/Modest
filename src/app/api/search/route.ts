@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchCatalog } from '@/lib/catalog';
 import { rateLimit } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req);
   const limit = rateLimit(`search:${ip}`, 120, 60_000);
   if (!limit.ok) return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
 

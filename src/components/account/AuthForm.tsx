@@ -6,14 +6,7 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import type { Dict } from '@/i18n/dictionaries';
 import type { Locale } from '@/i18n/config';
-
-/** Only allow same-site, absolute-path redirects (prevents open redirect). */
-function safePath(target: string | null | undefined): string | null {
-  if (target && target.startsWith('/') && !target.startsWith('//') && !target.startsWith('/\\')) {
-    return target;
-  }
-  return null;
-}
+import { safeRedirect as safePath } from '@/lib/redirect-safety';
 
 export function AuthForm({ locale, dict, mode }: { locale: Locale; dict: Dict; mode: 'signin' | 'signup' }) {
   const router = useRouter();

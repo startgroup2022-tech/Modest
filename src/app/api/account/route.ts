@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { addressSchema, changePasswordSchema, measurementSchema, profileSchema } from '@/lib/validation';
 import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -110,7 +111,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (kind === 'password') {
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+    const ip = clientIp(req);
     const limit = rateLimit(`password:${user.id}:${ip}`, 6, 15 * 60_000);
     if (!limit.ok) {
       return NextResponse.json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });

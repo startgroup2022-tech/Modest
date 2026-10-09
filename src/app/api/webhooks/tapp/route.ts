@@ -4,6 +4,7 @@ import { getPaymentProvider, normalizeCurrencyCode } from '@/lib/payments';
 import { applyPaymentResult, CheckoutError } from '@/lib/orders';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
         entity: 'Order',
         entityId: orderId,
         metadata: { expected: expectedCurrency, received: result.currency, provider: 'tapp' },
-        ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+        ip: clientIp(req),
       });
       return NextResponse.json({ error: 'Currency mismatch' }, { status: 400 });
     }

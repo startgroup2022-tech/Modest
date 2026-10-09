@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { guardTailorWrite, tailorErrorResponse } from '@/lib/tailor-principal';
 import { applyTailorTaskAction } from '@/lib/tailor-work';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
       taskId: id,
       action: parsed.data.action,
       actorLabel: `tailor:${access.tailorId}`,
-      ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+      ip: clientIp(req),
     });
     return NextResponse.json({ ok: true, status: result.status });
   } catch (err) {

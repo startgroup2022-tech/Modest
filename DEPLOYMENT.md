@@ -138,13 +138,52 @@ cPanel first and only run `migrate deploy` (never `migrate dev` on production).
 
 - Terminate TLS at cPanel/AutoSSL and force HTTPS. The app already sends
   `Strict-Transport-Security`.
-- Forward the real client IP: Passenger sets `X-Forwarded-For`, which the app
-  uses for rate limiting. Ensure the proxy passes it through unmodified.
 - The `/api/webhooks/tapp` endpoint must be reachable over HTTPS from TAPP.
   Point the TAPP dashboard webhook at
   `https://attention-modestfashion.com/api/webhooks/tapp`.
 - No custom rewrite rules are needed; all routing is handled by Next.js
   middleware and the App Router.
+
+### Rate limiting & proxy trust (required)
+
+`X-Forwarded-For` is client-controlled. The app no longer trusts the left-most
+value (which any client could rotate to bypass rate limiting); it trusts only the
+hops appended by our own proxies. Set **`TRUSTED_PROXY_COUNT`** to the number of
+reverse proxies sitting in front of the Node process:
+
+| Topology | `TRUSTED_PROXY_COUNT` |
+| --- | --- |
+| cPanel/Passenger → Node (Passenger is the only ingress) | `1` |
+| nginx → Node | `1` |
+| CDN → nginx → Node | `2` |
+| No proxy at all | `0` (unset) |
+
+**nginx must *overwrite* `X-Forwarded-For`, not append a client value.** The
+`$proxy_add_x_forwarded_for` variable appends the peer address to whatever the
+client sent; because the app counts from the right this is still safe, but
+`X-Real-IP` is set explicitly as a fallback. Add to the `server`/`location`
+block:
+
+```nginx
+# Tell the app how many proxies to trust (must match TRUSTED_PROXY_COUNT).
+# Set the same value in the app environment.
+
+# Overwrite the header with the address nginx actually saw. Never forward a
+# client-supplied X-Forwarded-For verbatim.
+proxy_set_header X-Real-IP        $remote_addr;
+proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header Host             $host;
+```
+
+If a CDN sits in front of nginx, its address range should be trusted and
+`TRUSTED_PROXY_COUNT` set to `2` (CDN hop + nginx hop). Do not set it higher than
+the real number of proxies — each extra trusted hop lets a client spoof one more
+position.
+
+> Changing the nginx config or `TRUSTED_PROXY_COUNT` on the production host is an
+> operations action and requires host access and authorization; it is **not**
+> performed by the application code.
 
 ---
 

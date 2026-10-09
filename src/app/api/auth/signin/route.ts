@@ -4,6 +4,8 @@ import { signInSchema } from '@/lib/validation';
 import { verifyPassword, setSessionCookie, type SessionKind } from '@/lib/auth';
 import { mergeGuestCartInto, mergeGuestWishlistInto } from '@/lib/cart';
 import { rateLimit } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/client-ip';
+import { safeRedirect } from '@/lib/redirect-safety';
 import { writeAudit } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +13,7 @@ export const dynamic = 'force-dynamic';
 const STAFF_ROLE_NAMES = ['ADMIN', 'MANAGER', 'SUPPORT'];
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req);
   const limit = rateLimit(`signin:${ip}`, 10, 60_000);
   if (!limit.ok) return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 });
 
@@ -65,12 +67,11 @@ export async function POST(req: NextRequest) {
 
   // Only echo a same-site absolute path; never reflect an external URL back to
   // the client, where it would be used as a redirect target (open redirect).
-  const raw = parsed.data.redirect ?? '';
-  const safeRedirect = raw.startsWith('/') && !raw.startsWith('//') && !raw.startsWith('/\\') ? raw : null;
+  const redirect = safeRedirect(parsed.data.redirect);
 
   return NextResponse.json({
     ok: true,
     role: user.role?.name ?? 'CUSTOMER',
-    redirect: safeRedirect,
+    redirect,
   });
 }

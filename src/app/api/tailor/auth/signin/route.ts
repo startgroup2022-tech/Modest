@@ -7,6 +7,7 @@ import {
   TailorAuthError,
 } from '@/lib/tailor-auth';
 import { prisma } from '@/lib/prisma';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,7 @@ const schema = z.object({
  * and additionally protected by a persistent per-credential lockout.
  */
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req);
   const limit = rateLimit(`tailor-signin:${ip}`, 10, 60_000);
   if (!limit.ok) return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 });
 

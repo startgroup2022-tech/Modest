@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import { safeRedirect } from '@/lib/redirect-safety';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
 import { AuthForm } from '@/components/account/AuthForm';
@@ -26,7 +27,8 @@ export default async function SignInPage({
   const { redirect: redirectTo } = await searchParams;
   const user = await getCurrentUser();
   if (user) {
-    if (redirectTo) redirect(redirectTo);
+    const target = safeRedirect(redirectTo);
+    if (target) redirect(target);
     redirect(user.role === 'CUSTOMER' ? `/${locale}/account` : `/${locale}/admin`);
   }
 

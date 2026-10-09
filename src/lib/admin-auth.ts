@@ -1,11 +1,14 @@
 import 'server-only';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { getCurrentUser, type CurrentUser } from './auth';
 import { prisma } from './prisma';
 import { getEffectivePermissions, type Permission } from './permissions';
 import { writeAudit } from './audit';
 import { isSameOriginRequest, CSRF_ERROR } from './csrf';
+import { clientIp } from '@/lib/client-ip';
+import { safeRedirect } from '@/lib/redirect-safety';
 
 /** HTTP methods that never change state, so origin checks do not apply. */
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -43,7 +46,13 @@ export async function getAdminUser(): Promise<AdminUser | null> {
  */
 export async function requireAdminPage(permission?: Permission, locale = 'en'): Promise<AdminUser> {
   const admin = await getAdminUser();
-  if (!admin) redirect(`/${locale}/account/sign-in?redirect=/${locale}/admin`);
+  if (!admin) {
+    // Preserve the page the visitor actually asked for so sign-in returns there
+    // (validated to a same-site path). Fall back to the admin root.
+    const requested = (await headers()).get('x-pathname');
+    const target = safeRedirect(requested) ?? `/${locale}/admin`;
+    redirect(`/${locale}/account/sign-in?redirect=${encodeURIComponent(target)}`);
+  }
   if (permission && !admin.permissions.has(permission)) redirect(`/${locale}/admin?denied=${permission}`);
   return admin;
 }
@@ -88,7 +97,7 @@ export function adminHandler(
     if (!SAFE_METHODS.has(req.method.toUpperCase()) && !isSameOriginRequest(req)) {
       return NextResponse.json({ error: CSRF_ERROR, code: 'CSRF_BLOCKED' }, { status: 403 });
     }
-    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+    const ip = clientIp(req);
     try {
       const url = new URL(req.url);
       return await handler({ admin, req, ip, searchParams: url.searchParams });

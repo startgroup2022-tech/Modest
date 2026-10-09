@@ -1,8 +1,31 @@
 /** @type {import('next').NextConfig} */
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+
+/** Resolve the commit this artifact was built from, at build time. */
+function buildCommit() {
+  const fromEnv = process.env.GIT_COMMIT_SHA || process.env.GIT_COMMIT || process.env.SOURCE_COMMIT;
+  if (fromEnv) return fromEnv.trim();
+  try {
+    return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return 'unknown';
+  }
+}
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,
+  // Inlined into the server bundle at build time so /api/version reports the
+  // exact commit and build timestamp of the deployed artifact (no secrets).
+  env: {
+    APP_BUILD_COMMIT: buildCommit(),
+    APP_BUILD_TIME: new Date().toISOString(),
+    APP_BUILD_VERSION: pkg.version ?? '0.0.0',
+  },
   images: {
     formats: ['image/avif', 'image/webp'],
     remotePatterns: [

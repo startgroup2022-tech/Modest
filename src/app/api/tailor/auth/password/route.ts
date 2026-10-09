@@ -9,6 +9,7 @@ import {
   getCurrentTailor,
 } from '@/lib/tailor-auth';
 import { prisma } from '@/lib/prisma';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
   const tailor = await getCurrentTailor();
   if (!tailor) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req);
   const limit = rateLimit(`tailor-password:${tailor.id}:${ip}`, 6, 15 * 60_000);
   if (!limit.ok) return NextResponse.json({ error: 'Too many attempts. Try again later.' }, { status: 429 });
 

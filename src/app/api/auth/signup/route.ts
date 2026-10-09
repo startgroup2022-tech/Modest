@@ -5,11 +5,12 @@ import { hashPassword, setSessionCookie } from '@/lib/auth';
 import { mergeGuestCartInto, mergeGuestWishlistInto } from '@/lib/cart';
 import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req);
   const limit = rateLimit(`signup:${ip}`, 8, 60_000);
   if (!limit.ok) return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 });
 
