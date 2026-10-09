@@ -13,6 +13,7 @@ export function ProductionTaskActions({
   tailorId,
   priority,
   dueDate,
+  taskStatus,
   tailors,
   transitions,
   canAssign,
@@ -23,6 +24,7 @@ export function ProductionTaskActions({
   tailorId: string | null;
   priority: string;
   dueDate: string | null;
+  taskStatus: string;
   tailors: { id: string; name: string }[];
   transitions: string[];
   canAssign: boolean;
@@ -70,6 +72,10 @@ export function ProductionTaskActions({
     cancel: { en: 'Cancel', ar: 'إلغاء' },
   };
 
+  // A cancelled/completed task accepts no cosmetic edits (the API enforces this
+  // too); hide the editor rather than offer an action that will 409.
+  const locked = taskStatus === 'CANCELLED' || taskStatus === 'COMPLETED';
+
   if (!canManage) return <span className="text-caption text-ink-faint">—</span>;
 
   return (
@@ -93,12 +99,12 @@ export function ProductionTaskActions({
             </button>
           );
         })}
-        <button type="button" onClick={() => setOpen((v) => !v)} disabled={busy} className="adm-btn-outline adm-btn-sm">
+        <button type="button" onClick={() => setOpen((v) => !v)} disabled={busy || locked} className="adm-btn-outline adm-btn-sm">
           {ar ? 'تعديل' : 'Edit'}
         </button>
       </div>
 
-      {open ? (
+      {open && !locked ? (
         <div className="grid gap-2">
           {canAssign ? (
             <select value={tailor} onChange={(e) => setTailor(e.target.value)} className="adm-select">

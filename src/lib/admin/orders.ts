@@ -6,6 +6,7 @@ import { releaseOrderStock } from '../orders';
 import { notifyOrderStatus, createNotification } from '../notifications';
 import { recomputeCustomerMembership } from '../membership-db';
 import { assertOrderSettledForProduction } from '../production-gate';
+import { assertOrderReadyForFulfillment, FulfillmentGateError } from '../fulfillment-gate';
 import { getPaymentProvider } from '../payments';
 import type { OrderStatus, PaymentStatus, Prisma } from '@prisma/client';
 
@@ -86,6 +87,21 @@ export async function transitionOrder(admin: AdminUser, input: TransitionInput) 
           'PAYMENT_REQUIRED',
           409,
         );
+      }
+    }
+
+    // Nothing ships before it is inspected. READY and SHIPPED require every
+    // production piece to be finished and QC-complete, so the QC workflow
+    // cannot be bypassed by advancing the order directly. Plain in-stock READY
+    // pieces carry no task and stay exempt (see `fulfillment-gate`).
+    if (input.to === 'READY' || input.to === 'SHIPPED') {
+      try {
+        await assertOrderReadyForFulfillment(order.id, tx);
+      } catch (err) {
+        if (err instanceof FulfillmentGateError) {
+          throw new AdminActionError(err.message, err.code, err.status);
+        }
+        throw err;
       }
     }
 

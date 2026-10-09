@@ -258,7 +258,12 @@ export async function assignTailorToProductionTask(input: {
     if (!task) throw new AssignmentError('Task not found', 'NOT_FOUND');
 
     const target = input.tailorId ? 'ASSIGNED' : 'PENDING';
-    if (!canTransition(PRODUCTION_TRANSITIONS, task.status, target)) {
+    // A completed piece that is handed to a (new) tailor must re-enter the
+    // workflow: the person who will actually make it may differ from whoever
+    // completed the prior version. Reopening is limited to a named tailor;
+    // every other illegal edge is still refused.
+    const reopen = task.status === 'COMPLETED' && input.tailorId != null;
+    if (!reopen && !canTransition(PRODUCTION_TRANSITIONS, task.status, target)) {
       throw new AssignmentError(`Cannot assign a task in ${task.status} state`, 'INVALID_TRANSITION');
     }
 
@@ -298,7 +303,14 @@ export async function assignTailorToProductionTask(input: {
 
     const updated = await tx.productionTask.update({
       where: { id: task.id },
-      data: { tailorId: input.tailorId, status: target, ...(feeBhd != null ? { feeBhd } : {}) },
+      data: {
+        tailorId: input.tailorId,
+        status: target,
+        ...(feeBhd != null ? { feeBhd } : {}),
+        // Reopening clears the completion stamp so the piece is not reported as
+        // finished while it is back on the floor.
+        ...(reopen ? { completedAt: null, acceptedAt: null, startedAt: null } : {}),
+      },
     });
 
     await tx.auditLog.create({

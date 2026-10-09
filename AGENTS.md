@@ -279,14 +279,46 @@ Next.js 15 App Router · TypeScript · Tailwind · Prisma/MySQL · Vitest.
   failed/rolled-back or same-tailor re-assignment. The helper also re-points the
   order item's `assignedTailorId` on every change, so a reassigned piece can
   never stay settle-payable to the tailor who lost it.
-- QC requires a rejection reason whenever the result is not `PASSED`, and only
-  runs on `QC_ALLOWED_STATES`. A PASS sets the task `COMPLETED`, otherwise
-  `REWORK`; the tailor sees the reason in the portal.
+- QC runs through a single decision service, `runQcInspection`
+  (`src/lib/qc.ts`): it requires a rejection reason whenever the result is not
+  `PASSED`, only runs on `QC_ALLOWED_STATES`, appends an immutable `QcRecord`
+  attempt (history is never overwritten), and sets the task `COMPLETED` on a pass
+  or `REWORK` otherwise. The admin `POST /api/admin/qc` is a thin wrapper.
+- QC decisions are concurrency-safe: the task move is a compare-and-swap
+  (`updateMany where status = <the status just read>`). Two inspectors racing the
+  same piece cannot both win — the loser matches zero rows, or under InnoDB's
+  REPEATABLE READ raises error 1020, which `isConcurrentWriteConflict` translates
+  to a `CONFLICT` `QcError` (HTTP 409). A stale `expectedStatus` from the
+  inspector's screen is refused the same way. The tailor sees the reason in the
+  portal.
 - `/en/tailor/` and `/ar/tailor/` are `noindex` and disallowed in `robots.ts`.
 - Admin-side controls: `ProductionTaskActions` (reassign/priority/due/workflow,
   `production.manage`; reassignment also needs `orders.assign`) and
   `SettlementRowActions` (the payout chain, `settlements.manage`) live on the
   production and settlements pages.
+
+## Admin production & quality control (Phase 6B)
+- The administration side is the same domain rules, surfaced for staff. The
+  production page (`/admin/production`) lists every task with URL-driven filters
+  (`searchParams` → `listProductionTasks` in `src/lib/admin/production.ts`),
+  scope chips (all / paid-unassigned / unassigned / assigned / overdue), KPI
+  counts (`productionCounts`) and a tailor-workload panel (`tailorWorkload`).
+  Assignment/reassignment flows through `assignTailorToProductionTask`; the page
+  never writes task state directly.
+- The QC page (`/admin/production/qc`) lists pieces awaiting inspection
+  (`SUBMITTED_FOR_QC`, `IN_PROGRESS`, `REWORK`) with a `QcInspectionForm` and an
+  immutable inspection history. The form posts to `POST /api/admin/qc` with the
+  task status it observed, so a decision on a stale screen is refused.
+- Nothing ships uninspected: order transitions to `READY` and `SHIPPED`
+  additionally pass `assertOrderReadyForFulfillment`
+  (`src/lib/fulfillment-gate.ts`). A production piece must have a task and *all*
+  its tasks `COMPLETED`. A piece "requires production" when it has a task, is
+  `measurementKind = CUSTOM`, is made-to-order, or is cut-based; a plain in-stock
+  `READY` piece is exempt, so ordinary stock fulfillment is unaffected.
+- Reassigning a `COMPLETED` task to a named tailor reopens it as `ASSIGNED`
+  (clearing `completedAt`/`acceptedAt`/`startedAt`) so a piece that changes hands
+  after a QC pass re-enters the workflow. Other illegal assignment edges are still
+  refused.
 
 ## Deployment
 - cPanel target: see `DEPLOYMENT.md`. Entry point is `server.js` (Passenger).

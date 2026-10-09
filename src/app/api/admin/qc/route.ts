@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
-import { prisma } from '@/lib/prisma';
-import { QC_ALLOWED_STATES } from '@/lib/workflow';
-import { notifyTailorQc } from '@/lib/tailor-notifications';
+import { runQcInspection, QcError } from '@/lib/qc';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,9 +15,12 @@ const schema = z
     finishingOk: z.boolean().default(false),
     accessoriesOk: z.boolean().default(false),
     packagingOk: z.boolean().default(false),
-    // Mandatory whenever the result is not PASSED; enforced below.
+    // Mandatory whenever the result is not PASSED; enforced by the service.
     rejectionReason: z.string().max(2000).optional().default(''),
     notes: z.string().max(4000).optional().default(''),
+    // Status the client observed when it opened the piece; guards against two
+    // inspectors recording conflicting decisions on the same piece.
+    expectedStatus: z.string().max(40).optional(),
   })
   .refine((d) => d.status === 'PASSED' || d.rejectionReason.trim().length > 0, {
     message: 'A rejection reason is required when quality control does not pass',
@@ -36,73 +37,30 @@ export const POST = adminHandler('qc.manage', async ({ admin, req }) => {
     );
   }
   const d = parsed.data;
-  const task = await prisma.productionTask.findUnique({ where: { id: d.taskId } });
-  if (!task) throw new AdminActionError('Task not found', 'NOT_FOUND', 404);
 
-  // Quality control only makes sense once work is under way. Rejecting QC on a
-  // task that never started (or was cancelled) prevents a phantom "PASSED".
-  if (!QC_ALLOWED_STATES.includes(task.status)) {
-    return NextResponse.json(
-      { error: `Cannot run QC on a task in ${task.status} state`, code: 'INVALID_TRANSITION' },
-      { status: 409 },
-    );
-  }
-
-  const record = await prisma.$transaction(async (tx) => {
-    // Attempt number continues the item's QC history; history is never
-    // overwritten — each run appends a new immutable row.
-    const previous = await tx.qcRecord.count({ where: { taskId: d.taskId } });
-    const rec = await tx.qcRecord.create({
-      data: {
-        taskId: d.taskId,
-        orderItemId: task.orderItemId ?? null,
-        tailorId: task.tailorId ?? null,
-        attempt: previous + 1,
-        status: d.status,
+  try {
+    const record = await runQcInspection({
+      taskId: d.taskId,
+      result: d.status,
+      checklist: {
         measurementsOk: d.measurementsOk,
         stitchingOk: d.stitchingOk,
         fabricOk: d.fabricOk,
         finishingOk: d.finishingOk,
         accessoriesOk: d.accessoriesOk,
         packagingOk: d.packagingOk,
-        rejectionReason: d.status === 'PASSED' ? null : d.rejectionReason.trim(),
-        notes: d.notes || null,
-        checkedById: admin.id,
-        checkedAt: new Date(),
       },
+      rejectionReason: d.rejectionReason,
+      notes: d.notes,
+      actorId: admin.id,
+      expectedStatus: d.expectedStatus ?? null,
     });
-    await tx.productionTask.update({
-      where: { id: d.taskId },
-      data: {
-        status: d.status === 'PASSED' ? 'COMPLETED' : 'REWORK',
-        completedAt: d.status === 'PASSED' ? new Date() : null,
-      },
-    });
-    // The tailor who worked the piece is told the outcome, including the
-    // mandatory rejection reason so rework is actionable from the portal.
-    if (task.tailorId) {
-      await notifyTailorQc(
-        {
-          tailorId: task.tailorId,
-          taskId: task.id,
-          taskCode: task.code,
-          passed: d.status === 'PASSED',
-          reason: d.status === 'PASSED' ? null : d.rejectionReason.trim(),
-        },
-        tx,
-      );
+    return NextResponse.json({ ok: true, id: record.id, attempt: record.attempt });
+  } catch (err) {
+    if (err instanceof QcError) {
+      if (err.code === 'NOT_FOUND') throw new AdminActionError(err.message, err.code, err.status);
+      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
     }
-    return rec;
-  });
-
-  await prisma.auditLog.create({
-    data: {
-      userId: admin.id,
-      action: 'qc.run',
-      entity: 'QcRecord',
-      entityId: record.id,
-      metadata: { status: d.status, attempt: record.attempt, orderItemId: task.orderItemId ?? null } as never,
-    },
-  });
-  return NextResponse.json({ ok: true, id: record.id, attempt: record.attempt });
+    throw err;
+  }
 });
