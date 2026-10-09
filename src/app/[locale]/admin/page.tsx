@@ -27,7 +27,8 @@ export default async function AdminDashboard({
   const admin = await requireAdminPage(undefined, locale);
   const { denied } = await searchParams;
   const dict = getAdminDict(locale);
-  const data = await getDashboardData(locale);
+  const data = await getDashboardData(locale, admin.permissions);
+  const can = (p: Parameters<typeof admin.permissions.has>[0]) => admin.permissions.has(p);
   const href = (p: string) => adminHref(locale, p);
 
   const statusTotal = data.statusBreakdown.reduce((s, x) => s + x.count, 0);
@@ -61,78 +62,102 @@ export default async function AdminDashboard({
         </div>
       )}
 
-      {/* KPIs */}
+      {/* KPIs — each card is only rendered when the viewer holds the
+          permission that governs the underlying data. */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <Kpi label={dict.dashboard.todaysSales} value={formatBhd(data.todaySalesBhd, locale)} href={href('reports/sales')} />
-        <Kpi label={dict.dashboard.monthSales} value={formatBhd(data.monthSalesBhd, locale)} href={href('reports/sales')} />
-        <Kpi label={dict.dashboard.orders} value={formatNumber(data.ordersCount, locale)} hint={formatBhd(data.avgOrderBhd, locale) + ' ' + (locale === 'ar' ? 'متوسط' : 'avg')} href={href('orders')} />
-        <Kpi
-          label={dict.dashboard.pendingPayments}
-          value={formatNumber(data.pendingPayments, locale)}
-          tone={data.pendingPayments > 0 ? 'warn' : 'default'}
-          href={href('payments?status=PENDING')}
-        />
-        <Kpi label={dict.dashboard.inProduction} value={formatNumber(data.inProduction, locale)} href={href('production')} />
-        <Kpi
-          label={dict.dashboard.qcPending}
-          value={formatNumber(data.qcPending, locale)}
-          tone={data.qcPending > 0 ? 'warn' : 'default'}
-          href={href('production/qc')}
-        />
-        <Kpi
-          label={dict.dashboard.lowStock}
-          value={formatNumber(data.lowStock, locale)}
-          tone={data.lowStock > 0 ? 'danger' : 'default'}
-          href={href('inventory?filter=low')}
-        />
-        <Kpi label={dict.dashboard.customers} value={formatNumber(data.customersCount, locale)} href={href('customers')} />
+        {can('reports.view') && (
+          <>
+            <Kpi label={dict.dashboard.todaysSales} value={formatBhd(data.todaySalesBhd, locale)} href={href('reports/sales')} />
+            <Kpi label={dict.dashboard.monthSales} value={formatBhd(data.monthSalesBhd, locale)} href={href('reports/sales')} />
+          </>
+        )}
+        {can('orders.view') && (
+          <Kpi label={dict.dashboard.orders} value={formatNumber(data.ordersCount, locale)} hint={formatBhd(data.avgOrderBhd, locale) + ' ' + (locale === 'ar' ? 'متوسط' : 'avg')} href={href('orders')} />
+        )}
+        {can('payments.view') && (
+          <Kpi
+            label={dict.dashboard.pendingPayments}
+            value={formatNumber(data.pendingPayments, locale)}
+            tone={data.pendingPayments > 0 ? 'warn' : 'default'}
+            href={href('payments?status=PENDING')}
+          />
+        )}
+        {can('production.view') && (
+          <Kpi label={dict.dashboard.inProduction} value={formatNumber(data.inProduction, locale)} href={href('production')} />
+        )}
+        {can('qc.view') && (
+          <Kpi
+            label={dict.dashboard.qcPending}
+            value={formatNumber(data.qcPending, locale)}
+            tone={data.qcPending > 0 ? 'warn' : 'default'}
+            href={href('production/qc')}
+          />
+        )}
+        {can('inventory.view') && (
+          <Kpi
+            label={dict.dashboard.lowStock}
+            value={formatNumber(data.lowStock, locale)}
+            tone={data.lowStock > 0 ? 'danger' : 'default'}
+            href={href('inventory?filter=low')}
+          />
+        )}
+        {can('customers.view') && (
+          <Kpi label={dict.dashboard.customers} value={formatNumber(data.customersCount, locale)} href={href('customers')} />
+        )}
       </div>
 
       {/* Secondary financials */}
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <Kpi label={dict.dashboard.netSales} value={formatBhd(data.netSalesBhd, locale)} />
-        <Kpi label={dict.dashboard.unitsSold} value={formatNumber(data.unitsSold, locale)} />
-        <Kpi label={dict.dashboard.discounts} value={formatBhd(data.discountsBhd, locale)} />
-        <Kpi label={dict.dashboard.expenses} value={formatBhd(data.expensesBhd, locale)} href={href('expenses')} />
-      </div>
+      {(can('reports.profits') || can('orders.view') || can('finance.view')) && (
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          {can('reports.profits') && <Kpi label={dict.dashboard.netSales} value={formatBhd(data.netSalesBhd, locale)} />}
+          {can('orders.view') && <Kpi label={dict.dashboard.unitsSold} value={formatNumber(data.unitsSold, locale)} />}
+          {can('reports.view') && <Kpi label={dict.dashboard.discounts} value={formatBhd(data.discountsBhd, locale)} />}
+          {can('finance.view') && <Kpi label={dict.dashboard.expenses} value={formatBhd(data.expensesBhd, locale)} href={href('expenses')} />}
+        </div>
+      )}
 
+      {(can('reports.view') || can('orders.view')) && (
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         {/* Sales intelligence */}
-        <Panel title={dict.dashboard.salesIntelligence} className="lg:col-span-2">
-          <BarSeries
-            data={data.salesSeries.map((p) => ({
-              label: new Date(p.label).toLocaleDateString(locale === 'ar' ? 'ar-BH' : 'en-GB', {
-                day: '2-digit',
-                month: 'short',
-                numberingSystem: 'latn',
-              }),
-              value: p.value,
-            }))}
-            locale={locale}
-            ariaLabel={dict.dashboard.salesIntelligence}
-          />
-          <div className="mt-4 grid grid-cols-2 gap-4 border-t border-line pt-4 sm:grid-cols-4">
-            <div>
-              <p className="adm-kpi-label">{dict.dashboard.revenue}</p>
-              <p className="adm-num mt-1 text-small text-ink">{formatBhd(data.monthSalesBhd, locale)}</p>
+        {can('reports.view') && (
+          <Panel title={dict.dashboard.salesIntelligence} className="lg:col-span-2">
+            <BarSeries
+              data={data.salesSeries.map((p) => ({
+                label: new Date(p.label).toLocaleDateString(locale === 'ar' ? 'ar-BH' : 'en-GB', {
+                  day: '2-digit',
+                  month: 'short',
+                  numberingSystem: 'latn',
+                }),
+                value: p.value,
+              }))}
+              locale={locale}
+              ariaLabel={dict.dashboard.salesIntelligence}
+            />
+            <div className="mt-4 grid grid-cols-2 gap-4 border-t border-line pt-4 sm:grid-cols-4">
+              <div>
+                <p className="adm-kpi-label">{dict.dashboard.revenue}</p>
+                <p className="adm-num mt-1 text-small text-ink">{formatBhd(data.monthSalesBhd, locale)}</p>
+              </div>
+              <div>
+                <p className="adm-kpi-label">{dict.dashboard.avgOrderValue}</p>
+                <p className="adm-num mt-1 text-small text-ink">{formatBhd(data.avgOrderBhd, locale)}</p>
+              </div>
+              {can('orders.refund') && (
+                <div>
+                  <p className="adm-kpi-label">{dict.dashboard.refunds}</p>
+                  <p className="adm-num mt-1 text-small text-ink">{formatBhd(data.refundsBhd, locale)}</p>
+                </div>
+              )}
+              <div>
+                <p className="adm-kpi-label">{dict.dashboard.unitsSold}</p>
+                <p className="adm-num mt-1 text-small text-ink">{formatNumber(data.unitsSold, locale)}</p>
+              </div>
             </div>
-            <div>
-              <p className="adm-kpi-label">{dict.dashboard.avgOrderValue}</p>
-              <p className="adm-num mt-1 text-small text-ink">{formatBhd(data.avgOrderBhd, locale)}</p>
-            </div>
-            <div>
-              <p className="adm-kpi-label">{dict.dashboard.refunds}</p>
-              <p className="adm-num mt-1 text-small text-ink">{formatBhd(data.refundsBhd, locale)}</p>
-            </div>
-            <div>
-              <p className="adm-kpi-label">{dict.dashboard.unitsSold}</p>
-              <p className="adm-num mt-1 text-small text-ink">{formatNumber(data.unitsSold, locale)}</p>
-            </div>
-          </div>
-        </Panel>
+          </Panel>
+        )}
 
         {/* Action center */}
-        <Panel title={dict.dashboard.actionCenter}>
+        <Panel title={dict.dashboard.actionCenter} className={can('reports.view') ? '' : 'lg:col-span-3'}>
           {data.actionCenter.length === 0 ? (
             <p className="py-6 text-center text-small text-ink-muted">{dict.dashboard.noAlerts}</p>
           ) : (
@@ -157,7 +182,9 @@ export default async function AdminDashboard({
           )}
         </Panel>
       </div>
+      )}
 
+      {can('orders.view') && (
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <Panel title={dict.dashboard.recentOrders} className="lg:col-span-2" bodyClassName="p-0">
           {data.recentOrders.length === 0 ? (
@@ -209,6 +236,7 @@ export default async function AdminDashboard({
           )}
         </Panel>
       </div>
+      )}
     </>
   );
 }

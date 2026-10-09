@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 
 /**
  * Approve / reject / pay transitions for an expense row. Approval is only shown
- * to holders of finance.approve; the API re-checks it regardless.
+ * to holders of expenses.approve; the API re-checks it regardless.
  */
 export function ExpenseRowActions({
   id,

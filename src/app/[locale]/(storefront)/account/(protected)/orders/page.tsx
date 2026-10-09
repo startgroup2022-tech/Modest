@@ -2,26 +2,12 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { getMyOrders } from '@/lib/account';
-import { getDictionary } from '@/i18n/dictionaries';
+import { customerStatusKey } from '@/lib/order-status';
+import { getDictionary, type Dict } from '@/i18n/dictionaries';
 import { type Locale } from '@/i18n/config';
 import { Price } from '@/components/ui/Price';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { PackageIcon } from '@/components/ui/icons';
-
-function statusMap() {
-  return {
-    PENDING: 'placed',
-    CONFIRMED: 'confirmed',
-    PREPARING: 'preparing',
-    IN_PRODUCTION: 'inProduction',
-    QUALITY_CHECK: 'qualityCheck',
-    READY: 'ready',
-    SHIPPED: 'shipped',
-    DELIVERED: 'delivered',
-    CANCELLED: 'cancelled',
-    REFUNDED: 'refunded',
-  } as const;
-}
 
 export default async function AccountOrdersPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale: raw } = await params;
@@ -31,7 +17,6 @@ export default async function AccountOrdersPage({ params }: { params: Promise<{ 
   if (!user?.customerId) redirect(`/${locale}/account/sign-in`);
 
   const orders = await getMyOrders(user.customerId);
-  const map = statusMap();
 
   if (!orders.length) {
     return (
@@ -50,7 +35,7 @@ export default async function AccountOrdersPage({ params }: { params: Promise<{ 
       <h2 className="mb-6 border-b border-line pb-3 text-h3">{dict.account.orders}</h2>
       <ul className="divide-y divide-line">
         {orders.map((o) => {
-          const label = map[o.status as keyof typeof map] ?? 'placed';
+          const label = customerStatusKey(o.status);
           return (
             <li key={o.id} className="py-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -68,7 +53,9 @@ export default async function AccountOrdersPage({ params }: { params: Promise<{ 
                 </div>
                 <div className="text-end">
                   <Price amountBhd={Number(o.totalBhd)} locale={locale} />
-                  <p className="mt-1 text-caption uppercase tracking-[0.12em] text-ink-faint">{dict.order[label]}</p>
+                  <p className="mt-1 text-caption uppercase tracking-[0.12em] text-ink-faint">
+                    {dict.order[label as keyof Dict['order']]}
+                  </p>
                 </div>
               </div>
               <Link

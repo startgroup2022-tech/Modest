@@ -20,7 +20,7 @@ export interface NavGroup {
 export const ADMIN_NAV: NavGroup[] = [
   {
     key: 'overview',
-    items: [{ path: '', key: 'dashboard' }],
+    items: [{ path: '', key: 'dashboard', permission: 'dashboard.view' }],
   },
   {
     key: 'commerce',
@@ -31,6 +31,7 @@ export const ADMIN_NAV: NavGroup[] = [
       { path: 'categories', key: 'categories', permission: 'products.view' },
       { path: 'collections', key: 'collections', permission: 'products.view' },
       { path: 'inventory', key: 'inventory', permission: 'inventory.view' },
+      { path: 'promotions', key: 'promotions', permission: 'promotions.view' },
       { path: 'coupons', key: 'coupons', permission: 'promotions.view' },
     ],
   },
@@ -62,6 +63,7 @@ export const ADMIN_NAV: NavGroup[] = [
       { path: 'payments', key: 'payments', permission: 'payments.view', badge: 'payments' },
       { path: 'refunds', key: 'refunds', permission: 'orders.refund', badge: 'refunds' },
       { path: 'expenses', key: 'expenses', permission: 'expenses.view', badge: 'expenses' },
+      { path: 'settlements', key: 'settlements', permission: 'settlements.view' },
     ],
   },
   {

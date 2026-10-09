@@ -13,6 +13,7 @@ import { Price } from '@/components/ui/Price';
 import { ArrowRight, WhatsAppIcon } from '@/components/ui/icons';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
+import { seoTitle, jsonLdHtml } from '@/lib/seo';
 
 export async function generateMetadata({
   params,
@@ -30,7 +31,7 @@ export async function generateMetadata({
   const path = `/${locale}/product/${product.slug}`;
   const image = product.media[0]?.url;
   return {
-    title: (locale === 'ar' ? product.metaTitleAr : product.metaTitleEn) ?? name,
+    title: seoTitle(locale === 'ar' ? product.metaTitleAr : product.metaTitleEn, name, locale),
     description,
     alternates: {
       canonical: path,
@@ -61,7 +62,7 @@ export default async function ProductPage({
   const dict = getDictionary(locale);
 
   const product = await getProductBySlug(slug);
-  if (!product || product.status !== 'ACTIVE') notFound();
+  if (!product) notFound();
 
   const [related, store, shipping] = await Promise.all([
     getRelatedProducts(product, 4),
@@ -98,6 +99,44 @@ export default async function ProductPage({
     stock: v.stock,
     stockStatus: v.stockStatus as 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'PRE_ORDER',
   }));
+
+  // The product's cut, mapped into the shape the buyer-side selector expects.
+  // Ready sizes come from the cut's chart; the matrix is keyed by field key.
+  const cutChart = product.cut?.sizeCharts[0] ?? null;
+  const readySizesOrder = ['XS', 'S', 'M', 'L', 'XL'];
+  const cutSizes = cutChart
+    ? [...new Set(cutChart.values.map((v) => v.sizeCode))].sort(
+        (a, b) => readySizesOrder.indexOf(a) - readySizesOrder.indexOf(b),
+      )
+    : [];
+  const cutMatrix: Record<string, Record<string, number>> = {};
+  for (const f of product.cut?.fields ?? []) cutMatrix[f.key] = {};
+  for (const cell of cutChart?.values ?? []) {
+    const key = cell.field?.key ?? product.cut?.fields.find((f) => f.id === cell.fieldId)?.key;
+    if (key) cutMatrix[key][cell.sizeCode] = Number(cell.value);
+  }
+  const cut = product.cut
+    ? {
+        code: product.cut.code,
+        nameEn: product.cut.nameEn,
+        nameAr: product.cut.nameAr,
+        unit: cutChart?.unit ?? 'inch',
+        sizes: cutSizes,
+        fields: product.cut.fields
+          .filter((f) => f.isActive)
+          .map((f) => ({
+            key: f.key,
+            labelEn: f.labelEn,
+            labelAr: f.labelAr,
+            unit: f.unit,
+            minValue: f.minValue != null ? Number(f.minValue) : null,
+            maxValue: f.maxValue != null ? Number(f.maxValue) : null,
+            helperEn: f.helperEn,
+            helperAr: f.helperAr,
+          })),
+        matrix: cutMatrix,
+      }
+    : null;
 
   const productJsonLd = {
     '@context': 'https://schema.org',
@@ -150,8 +189,8 @@ export default async function ProductPage({
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdHtml(productJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdHtml(breadcrumbJsonLd) }} />
 
       <div className="shell pt-8 md:pt-12">
         <nav aria-label="Breadcrumb" className="mb-6">
@@ -226,6 +265,7 @@ export default async function ProductPage({
               madeToOrder={product.madeToOrder}
               leadTimeMin={product.leadTimeMinDays}
               leadTimeMax={product.leadTimeMaxDays}
+              cut={cut}
               dict={dict}
               locale={locale}
               sizeGuideHref={`/${locale}/size-guide`}

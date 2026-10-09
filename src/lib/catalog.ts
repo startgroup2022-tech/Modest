@@ -32,12 +32,18 @@ export const productDetailInclude = {
   variants: { where: { isActive: true }, orderBy: { sortOrder: 'asc' as const } },
   categories: { include: { category: true } },
   collections: { include: { collection: true } },
+  cut: { include: { sizeCharts: { include: { values: { include: { field: true } } } }, fields: { orderBy: { sortOrder: 'asc' as const } } } },
 } satisfies Prisma.ProductInclude;
 
 export type ProductDetail = Prisma.ProductGetPayload<{ include: typeof productDetailInclude }>;
 
+// Statuses a shopper may see. DRAFT (internal), UNAVAILABLE (published but not
+// purchasable → hidden from listing) and ARCHIVED are excluded. Switching this
+// one list changes storefront visibility everywhere.
+export const STOREFRONT_PRODUCT_STATUSES: ProductStatus[] = ['ACTIVE', 'PREORDER'];
+
 function buildWhere(query: ProductQuery): Prisma.ProductWhereInput {
-  const where: Prisma.ProductWhereInput = { status: 'ACTIVE' as ProductStatus };
+  const where: Prisma.ProductWhereInput = { status: { in: STOREFRONT_PRODUCT_STATUSES } };
 
   if (query.categorySlugs?.length) {
     where.categories = { some: { category: { slug: { in: query.categorySlugs } } } };
@@ -112,7 +118,7 @@ export async function getProducts(query: ProductQuery) {
 
 export async function getFeaturedProducts(limit = 8) {
   return prisma.product.findMany({
-    where: { status: 'ACTIVE', isFeatured: true },
+    where: { status: { in: STOREFRONT_PRODUCT_STATUSES }, isFeatured: true },
     include: productCardInclude,
     orderBy: [{ createdAt: 'desc' }],
     take: limit,
@@ -121,7 +127,7 @@ export async function getFeaturedProducts(limit = 8) {
 
 export async function getNewArrivals(limit = 4) {
   return prisma.product.findMany({
-    where: { status: 'ACTIVE', isNewArrival: true },
+    where: { status: { in: STOREFRONT_PRODUCT_STATUSES }, isNewArrival: true },
     include: productCardInclude,
     orderBy: [{ createdAt: 'desc' }],
     take: limit,
@@ -130,7 +136,7 @@ export async function getNewArrivals(limit = 4) {
 
 export async function getProductBySlug(slug: string): Promise<ProductDetail | null> {
   return prisma.product.findFirst({
-    where: { slug, status: 'ACTIVE' },
+    where: { slug, status: { in: STOREFRONT_PRODUCT_STATUSES } },
     include: productDetailInclude,
   });
 }
@@ -140,7 +146,7 @@ export async function getRelatedProducts(product: ProductDetail, limit = 4) {
   const categorySlugs = product.categories.map((c) => c.category.slug);
   return prisma.product.findMany({
     where: {
-      status: 'ACTIVE',
+      status: { in: STOREFRONT_PRODUCT_STATUSES },
       id: { not: product.id },
       OR: [
         { collections: { some: { collection: { slug: { in: collectionSlugs } } } } },
@@ -156,7 +162,7 @@ export async function getCategories() {
   return prisma.category.findMany({
     where: { isActive: true },
     orderBy: { sortOrder: 'asc' },
-    include: { _count: { select: { products: { where: { product: { status: 'ACTIVE' } } } } } },
+    include: { _count: { select: { products: { where: { product: { status: { in: STOREFRONT_PRODUCT_STATUSES } } } } } } },
   });
 }
 
@@ -164,7 +170,7 @@ export async function getCollections() {
   return prisma.collection.findMany({
     where: { isActive: true },
     orderBy: { sortOrder: 'asc' },
-    include: { _count: { select: { products: { where: { product: { status: 'ACTIVE' } } } } } },
+    include: { _count: { select: { products: { where: { product: { status: { in: STOREFRONT_PRODUCT_STATUSES } } } } } } },
   });
 }
 
@@ -178,7 +184,7 @@ export async function getCategoryBySlug(slug: string) {
 
 export async function getPriceBounds() {
   const result = await prisma.product.aggregate({
-    where: { status: 'ACTIVE' },
+    where: { status: { in: STOREFRONT_PRODUCT_STATUSES } },
     _min: { priceBhd: true },
     _max: { priceBhd: true },
   });
@@ -222,7 +228,7 @@ export async function searchCatalog(rawQuery: string, limit = 8): Promise<Search
 export async function getProductsByIds(ids: string[]) {
   if (!ids.length) return [];
   return prisma.product.findMany({
-    where: { id: { in: ids }, status: 'ACTIVE' },
+    where: { id: { in: ids }, status: { in: STOREFRONT_PRODUCT_STATUSES } },
     include: productCardInclude,
   });
 }

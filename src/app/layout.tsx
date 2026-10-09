@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 import { Montserrat, Cairo } from 'next/font/google';
 import { dir, isLocale, type Locale } from '@/i18n/config';
+import { getStoreInfo } from '@/lib/site';
 import './globals.css';
 
 const montserrat = Montserrat({
@@ -20,7 +21,7 @@ const cairo = Cairo({
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
 
-export const metadata: Metadata = {
+const baseMetadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
     default: 'Attention Modest Fashion — Modern Modesty',
@@ -54,4 +55,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>{children}</body>
     </html>
   );
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const store = await getStoreInfo();
+  if (!store.faviconUrl) return baseMetadata;
+  return {
+    ...baseMetadata,
+    icons: { icon: [{ url: store.faviconUrl }], shortcut: [store.faviconUrl], apple: [store.faviconUrl] },
+  };
 }

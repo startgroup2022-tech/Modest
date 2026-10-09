@@ -42,6 +42,34 @@ interface ProductSeed {
   metaDescAr?: string;
 }
 
+// The approved storefront catalog is exactly the eight pieces currently shown
+// on the live site's homepage ("Latest Products"). Everything else in the
+// historical seed list is archived — never deleted — so orders that reference
+// it keep their integrity while the storefront stops showing it.
+const APPROVED_SLUGS = [
+  'midnight-garden-kimono-ii',
+  'ligne-sauvage',
+  'le-retour',
+  'hidden-in-the-dark',
+  'black-tie-pre-order',
+  'the-queen-b-cape',
+  'tide-over-gown',
+  'etoile-de-soi',
+] as const;
+
+// Silhouette / cut assignment and the approved default tailoring fee. The fee
+// is set only where the specification names it unambiguously; no fallback is
+// invented for other products.
+const CUT_BY_SLUG: Record<string, string> = {
+  'midnight-garden-kimono-ii': 'TAILORED',
+  'tide-over-gown': 'TAILORED',
+  'etoile-de-soi': 'BISHT',
+};
+const TAILOR_FEE_BY_SLUG: Record<string, number> = {
+  'tide-over-gown': 20,
+  'etoile-de-soi': 20,
+};
+
 const products: ProductSeed[] = [
   {
     slug: 'midnight-garden-kimono-ii',
@@ -453,6 +481,7 @@ async function main() {
     { name: 'MANAGER' as const, description: 'Catalogue & orders' },
     { name: 'SUPPORT' as const, description: 'Orders & customers' },
     { name: 'CUSTOMER' as const, description: 'Storefront customer' },
+    { name: 'TAILOR' as const, description: 'Tailor Portal (separate credential)' },
   ];
   const roles: Record<string, string> = {};
   for (const r of roleDefs) {
@@ -602,8 +631,121 @@ async function main() {
     collectionIds[c.slug] = row.id;
   }
 
+  // ── Silhouettes / cuts + size guide (specification values) ──
+  // The database is the source of truth for the storefront size guide. These
+  // seeded values come from the authoritative operating specification; no
+  // values are invented. Editing them in Admin later never changes historical
+  // order snapshots.
+  const READY_SIZES = ['XS', 'S', 'M', 'L', 'XL'];
+  const cuts = [
+    {
+      code: 'TAILORED',
+      nameEn: 'Tailored Silhouette',
+      nameAr: 'القَصّة المُخيطة',
+      descriptionEn: 'A structured, tailored cut.',
+      descriptionAr: 'قَصّة مُخيطة ومهيكلة.',
+      sortOrder: 1,
+      fields: [
+        { key: 'shoulder_width', labelEn: 'Shoulder Width', labelAr: 'عرض الكتف', min: 12, max: 22, helperEn: null, helperAr: null, sortOrder: 1 },
+        {
+          key: 'half_bust', labelEn: 'Half Bust', labelAr: 'نصف الصدر', min: 16, max: 34, sortOrder: 2,
+          helperEn: 'Measured across the garment laid flat — half circumference.',
+          helperAr: 'يُقاس عرضاً على القطعة مفرودة — نصف المحيط.',
+        },
+        {
+          key: 'sleeve_length', labelEn: 'Sleeve Length', labelAr: 'طول الكم', min: 16, max: 34, sortOrder: 3,
+          helperEn: null, helperAr: null,
+        },
+        { key: 'half_sleeve_bicep', labelEn: 'Half Sleeve Bicep', labelAr: 'نصف عَضلة الكم', min: 4, max: 12, sortOrder: 4, helperEn: 'Across the sleeve at the bicep, laid flat.', helperAr: 'عرض الكم عند العَضلة، مفروداً.' },
+        { key: 'half_sleeve_hem', labelEn: 'Half Sleeve Hem', labelAr: 'نصف حاشية الكم', min: 3, max: 10, sortOrder: 5, helperEn: 'Across the sleeve opening, laid flat.', helperAr: 'عرض فتحة الكم، مفرودة.' },
+      ],
+      values: {
+        shoulder_width: { XS: 15.2, S: 15.6, M: 15.8, L: 16, XL: 16.2 },
+        half_bust: { XS: 22, S: 23, M: 24, L: 27, XL: 28 },
+        sleeve_length: { XS: 22, S: 23, M: 24, L: 25, XL: 26 },
+        half_sleeve_bicep: { XS: 6, S: 6.5, M: 7, L: 7.5, XL: 8.2 },
+        half_sleeve_hem: { XS: 4.75, S: 5.25, M: 5.5, L: 6, XL: 6.7 },
+      },
+    },
+    {
+      code: 'BISHT',
+      nameEn: 'Bisht Silhouette',
+      nameAr: 'قَصّة البشت',
+      descriptionEn: 'A flowing bisht cut.',
+      descriptionAr: 'قَصّة بشت منسدلة.',
+      sortOrder: 2,
+      fields: [
+        { key: 'shoulder_width', labelEn: 'Shoulder Width', labelAr: 'عرض الكتف', min: 12, max: 22, sortOrder: 1, helperEn: null, helperAr: null },
+        { key: 'half_bust', labelEn: 'Half Bust', labelAr: 'نصف الصدر', min: 16, max: 40, sortOrder: 2, helperEn: 'Measured across the garment laid flat — half circumference.', helperAr: 'يُقاس عرضاً على القطعة مفرودة — نصف المحيط.' },
+        { key: 'sleeve_length', labelEn: 'Sleeve Length', labelAr: 'طول الكم', min: 14, max: 30, sortOrder: 3, helperEn: null, helperAr: null },
+      ],
+      values: {
+        shoulder_width: { XS: 14.5, S: 14.9, M: 15, L: 15.2, XL: 15.5 },
+        half_bust: { XS: 25, S: 27, M: 30, L: 36, XL: 39 },
+        sleeve_length: { XS: 17, S: 18, M: 19, L: 20, XL: 21 },
+      },
+    },
+  ];
+  const cutIds: Record<string, string> = {};
+  for (const cut of cuts) {
+    // `update: {}` keeps an admin's live edits intact on repeated seed runs.
+    const row = await prisma.productCut.upsert({
+      where: { code: cut.code },
+      update: {},
+      create: {
+        code: cut.code,
+        nameEn: cut.nameEn,
+        nameAr: cut.nameAr,
+        descriptionEn: cut.descriptionEn,
+        descriptionAr: cut.descriptionAr,
+        sortOrder: cut.sortOrder,
+      },
+    });
+    cutIds[cut.code] = row.id;
+
+    const chart = await prisma.sizeChart.upsert({
+      where: { cutId: row.id },
+      update: {},
+      create: { cutId: row.id, unit: 'inch' },
+    });
+
+    for (const f of cut.fields) {
+      const field = await prisma.measurementField.upsert({
+        where: { cutId_key: { cutId: row.id, key: f.key } },
+        update: {},
+        create: {
+          cutId: row.id,
+          key: f.key,
+          labelEn: f.labelEn,
+          labelAr: f.labelAr,
+          unit: 'inch',
+          minValue: f.min,
+          maxValue: f.max,
+          helperEn: f.helperEn,
+          helperAr: f.helperAr,
+          sortOrder: f.sortOrder,
+        },
+      });
+      const sizeValues = (cut.values as Record<string, Record<string, number>>)[f.key] ?? {};
+      for (const sizeCode of READY_SIZES) {
+        const value = sizeValues[sizeCode];
+        if (value == null) continue;
+        await prisma.sizeChartValue.upsert({
+          where: { chartId_fieldId_sizeCode: { chartId: chart.id, fieldId: field.id, sizeCode } },
+          update: {},
+          create: { chartId: chart.id, fieldId: field.id, sizeCode, value, sortOrder: READY_SIZES.indexOf(sizeCode) },
+        });
+      }
+    }
+  }
+
   // ── Products ───────────────────────────────────────────
   for (const p of products) {
+    const approved = (APPROVED_SLUGS as readonly string[]).includes(p.slug);
+    // Published-but-unavailable is distinct from unpublished: an archived
+    // product is hidden everywhere; a preorder keeps its own lifecycle state.
+    const status = !approved ? ('ARCHIVED' as const) : p.preOrder ? ('PREORDER' as const) : ('ACTIVE' as const);
+    const cutCode = CUT_BY_SLUG[p.slug];
     const data = {
       slug: p.slug,
       nameEn: p.nameEn,
@@ -620,8 +762,10 @@ async function main() {
       careAr: p.careAr,
       priceBhd: p.priceBhd,
       compareAtBhd: p.compareAtBhd,
-      status: 'ACTIVE' as const,
+      status,
       kind: p.madeToOrder ? ('MADE_TO_ORDER' as const) : ('READY_TO_WEAR' as const),
+      cutId: cutCode ? cutIds[cutCode] : null,
+      tailorFeeBhd: TAILOR_FEE_BY_SLUG[p.slug] ?? null,
       isFeatured: p.isFeatured ?? false,
       isNewArrival: p.isNewArrival ?? false,
       madeToOrder: p.madeToOrder ?? false,
@@ -658,12 +802,17 @@ async function main() {
     }
 
     await prisma.productVariant.deleteMany({ where: { productId: product.id } });
-    for (let i = 0; i < p.sizes.length; i++) {
+    // A cut product is sold by the ready sizes of its own size chart, so its
+    // variants must be exactly those codes. Deriving them here (rather than from
+    // a hand-maintained `sizes` list) keeps variants and chart in lockstep — a
+    // cut product can never be seeded with sizes its chart does not offer.
+    const variantSizes = cutCode ? READY_SIZES : p.sizes;
+    for (let i = 0; i < variantSizes.length; i++) {
       await prisma.productVariant.create({
         data: {
           productId: product.id,
-          sku: `${p.slug.toUpperCase().replace(/-/g, '').slice(0, 12)}-${p.sizes[i]}`,
-          size: p.sizes[i],
+          sku: `${p.slug.toUpperCase().replace(/-/g, '').slice(0, 12)}-${variantSizes[i]}`,
+          size: variantSizes[i],
           stock: p.preOrder ? 0 : 4 + ((i * 3) % 7),
           stockStatus: p.preOrder ? 'PRE_ORDER' : 'IN_STOCK',
           sortOrder: i,
@@ -689,6 +838,19 @@ async function main() {
   ];
   for (const c of coupons) {
     await prisma.coupon.upsert({ where: { code: c.code }, update: c, create: c });
+  }
+
+  // ── Membership tiers ───────────────────────────────────
+  // Tiers are thresholds on the count of qualifying paid, non-refunded pieces.
+  // The count itself is derived (see src/lib/membership-db.ts); only the
+  // thresholds are stored, so an owner can retune them without touching orders.
+  const membershipTiers = [
+    { code: 'SIGNATURE', nameEn: 'Signature', nameAr: 'سيجنتشر', minQualifying: 0, sortOrder: 1 },
+    { code: 'GOLD', nameEn: 'Gold', nameAr: 'ذهبي', minQualifying: 5, sortOrder: 2 },
+    { code: 'PLATINUM', nameEn: 'Platinum', nameAr: 'بلاتيني', minQualifying: 12, sortOrder: 3 },
+  ];
+  for (const t of membershipTiers) {
+    await prisma.membershipTier.upsert({ where: { code: t.code }, update: t, create: t });
   }
 
   // ── Social links ───────────────────────────────────────
@@ -774,6 +936,12 @@ async function main() {
       value: { allowGuestCheckout: true, requirePhone: true, enableOrderNotes: true, enableCoupons: true, requireTerms: true },
     },
     {
+      // Products excluded from membership qualification (accessories, gift
+      // cards, etc.). Empty means every paid piece qualifies.
+      key: 'membership',
+      value: { excludedProductIds: [] },
+    },
+    {
       key: 'tapp_config',
       value: {
         enabled: false,
@@ -805,7 +973,7 @@ async function main() {
     await prisma.siteSetting.upsert({ where: { key: s.key }, update: { value: s.value as never }, create: { key: s.key, value: s.value as never } });
   }
 
-  console.log(`✔ Seed complete — ${products.length} products, ${categories.length} categories, ${collections.length} collections.`);
+  console.log(`✔ Seed complete — ${APPROVED_SLUGS.length} approved storefront products (of ${products.length} seeded), ${categories.length} categories, ${collections.length} collections, ${cuts.length} silhouettes.`);
   console.log(`  Admin: ${adminUser.email} (password from SEED_ADMIN_PASSWORD)`);
   console.log(`  Demo customer: ${demoUser.email}`);
 }

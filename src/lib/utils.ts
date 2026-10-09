@@ -33,6 +33,13 @@ export function formatMoney(
     : `${opts.symbol} ${formatted}`;
 }
 
+/**
+ * Legacy random order number. Superseded by the concurrency-safe sequence
+ * allocator in `lib/sequences.ts`; retained only so existing callers/tests keep
+ * compiling during the transition.
+ *
+ * @deprecated Use `nextSequence` with the `ATT` spec instead.
+ */
 export function generateOrderNumber(): string {
   const now = new Date();
   const y = now.getFullYear().toString().slice(-2);

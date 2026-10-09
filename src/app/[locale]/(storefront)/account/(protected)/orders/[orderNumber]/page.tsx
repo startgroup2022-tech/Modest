@@ -5,8 +5,18 @@ import { getCurrentUser } from '@/lib/auth';
 import { getMyOrder } from '@/lib/account';
 import { getDictionary } from '@/i18n/dictionaries';
 import { type Locale } from '@/i18n/config';
-import { Price } from '@/components/ui/Price';
+import { OrderPrice } from '@/components/ui/OrderPrice';
 import { OrderTimeline } from '@/components/account/OrderTimeline';
+import { customerPaymentStatusKey, toCustomerTimeline } from '@/lib/order-status';
+import type { Dict } from '@/i18n/dictionaries';
+
+/** Localised label for a payment method using the checkout dictionary keys. */
+const PAYMENT_METHOD_KEY: Record<string, keyof Dict['checkout']> = {
+  COD: 'cod',
+  BANK_TRANSFER: 'bankTransfer',
+  BENEFIT: 'benefit',
+  TAPP: 'tapp',
+};
 
 export default async function OrderDetailPage({
   params,
@@ -23,6 +33,7 @@ export default async function OrderDetailPage({
   if (!order) notFound();
 
   const payment = order.payments[0];
+  const money = { code: order.presentmentCode, rate: Number(order.presentmentRate) };
 
   return (
     <div className="space-y-10">
@@ -55,7 +66,7 @@ export default async function OrderDetailPage({
                       {dict.cart.quantity}: {item.quantity}
                     </p>
                   </div>
-                  <Price amountBhd={Number(item.lineTotalBhd)} locale={locale} className="text-small" />
+                  <OrderPrice amountBhd={Number(item.lineTotalBhd)} code={money.code} rate={money.rate} locale={locale} className="text-small" />
                 </li>
               ))}
             </ul>
@@ -68,7 +79,7 @@ export default async function OrderDetailPage({
               <div className="flex justify-between">
                 <dt className="text-ink-muted">{dict.cart.subtotal}</dt>
                 <dd className="tabular-nums">
-                  {Number(order.subtotalBhd).toFixed(3)} {order.presentmentCode}
+                  <OrderPrice amountBhd={Number(order.subtotalBhd)} code={money.code} rate={money.rate} locale={locale} />
                 </dd>
               </div>
               {Number(order.discountBhd) > 0 ? (
@@ -78,20 +89,24 @@ export default async function OrderDetailPage({
                     {order.couponCode ? ` (${order.couponCode})` : ''}
                   </dt>
                   <dd className="tabular-nums">
-                    − {Number(order.discountBhd).toFixed(3)} {order.presentmentCode}
+                    − <OrderPrice amountBhd={Number(order.discountBhd)} code={money.code} rate={money.rate} locale={locale} />
                   </dd>
                 </div>
               ) : null}
               <div className="flex justify-between">
                 <dt className="text-ink-muted">{dict.cart.shipping}</dt>
                 <dd className="tabular-nums">
-                  {Number(order.shippingBhd) === 0 ? dict.cart.free : `${Number(order.shippingBhd).toFixed(3)} ${order.presentmentCode}`}
+                  {Number(order.shippingBhd) === 0 ? (
+                    dict.cart.free
+                  ) : (
+                    <OrderPrice amountBhd={Number(order.shippingBhd)} code={money.code} rate={money.rate} locale={locale} />
+                  )}
                 </dd>
               </div>
               <div className="flex justify-between border-t border-line pt-3 text-h4">
                 <dt>{dict.cart.total}</dt>
                 <dd className="tabular-nums">
-                  {Number(order.totalBhd).toFixed(3)} {order.presentmentCode}
+                  <OrderPrice amountBhd={Number(order.totalBhd)} code={money.code} rate={money.rate} locale={locale} />
                 </dd>
               </div>
             </dl>
@@ -104,7 +119,7 @@ export default async function OrderDetailPage({
         <aside className="space-y-8">
           <section>
             <h3 className="eyebrow mb-4 border-b border-line pb-3">{dict.order.timeline}</h3>
-            <OrderTimeline currentStatus={order.status} dict={dict} events={order.events} />
+            <OrderTimeline currentStatus={order.status} dict={dict} events={toCustomerTimeline(order.events)} />
           </section>
 
           <section>
@@ -112,14 +127,49 @@ export default async function OrderDetailPage({
             <dl className="space-y-2 text-small">
               <div className="flex justify-between">
                 <dt className="text-ink-muted">{dict.order.paymentMethod}</dt>
-                <dd>{payment?.method.replace('_', ' ') ?? '—'}</dd>
+                <dd>{payment ? dict.checkout[PAYMENT_METHOD_KEY[payment.method] ?? 'paymentMethod'] : '—'}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-ink-muted">{dict.order.paymentStatus}</dt>
-                <dd className="uppercase tracking-[0.08em]">{payment?.status ?? 'PENDING'}</dd>
+                <dd>
+                  {payment
+                    ? dict.order[customerPaymentStatusKey(payment.status) as keyof Dict['order']]
+                    : dict.order.paymentPending}
+                </dd>
               </div>
+              {payment?.providerRef ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-ink-muted">{dict.order.paymentReference}</dt>
+                  <dd className="truncate text-end">{payment.providerRef}</dd>
+                </div>
+              ) : null}
             </dl>
+            {payment?.paymentUrl && payment.status !== 'PAID' ? (
+              <a href={payment.paymentUrl} target="_blank" rel="noopener noreferrer" className="btn-outline mt-4 w-full">
+                {dict.checkout.payNow}
+              </a>
+            ) : null}
           </section>
+
+          {order.refunds.length > 0 ? (
+            <section>
+              <h3 className="eyebrow mb-4 border-b border-line pb-3">{dict.order.amountRefunded}</h3>
+              <ul className="space-y-2 text-small">
+                {order.refunds.map((r) => (
+                  <li key={r.id} className="flex justify-between gap-4">
+                    <span className="text-ink-muted">{r.createdAt.toISOString().slice(0, 10)}</span>
+                    <OrderPrice
+                      amountBhd={Number(r.amountBhd)}
+                      code={money.code}
+                      rate={money.rate}
+                      locale={locale}
+                      className="tabular-nums"
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           <section>
             <h3 className="eyebrow mb-4 border-b border-line pb-3">{dict.order.shippingAddress}</h3>

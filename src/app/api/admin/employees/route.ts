@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { adminHandler } from '@/lib/admin-auth';
+import { adminHandler, AdminActionError, isSuperAdmin } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
 import { hashPassword } from '@/lib/auth';
+import { getRolePermissions, forbiddenGrants } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,23 @@ export const POST = adminHandler('users.manage', async ({ admin, req }) => {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Validation failed', issues: parsed.error.issues }, { status: 422 });
   const d = parsed.data;
+
+  const role = await prisma.role.findUnique({ where: { id: d.roleId } });
+  if (!role) throw new AdminActionError('Role not found', 'NOT_FOUND', 404);
+
+  // Privilege escalation guard: a non-super-admin may not create an account
+  // whose role carries permissions they do not themselves hold.
+  if (!isSuperAdmin(admin)) {
+    const rolePerms = await getRolePermissions(role.id);
+    const forbidden = forbiddenGrants(admin, rolePerms);
+    if (forbidden.length) {
+      return NextResponse.json(
+        { error: 'You cannot create an account with permissions you do not hold', code: 'PRIVILEGE_ESCALATION', permissions: forbidden },
+        { status: 403 },
+      );
+    }
+  }
+
   const dupe = await prisma.user.findUnique({ where: { email: d.email.toLowerCase() } });
   if (dupe) return NextResponse.json({ error: 'That email is already in use' }, { status: 409 });
 
@@ -40,6 +58,14 @@ export const POST = adminHandler('users.manage', async ({ admin, req }) => {
       isActive: d.status === 'ACTIVE',
     },
   });
-  await prisma.auditLog.create({ data: { userId: admin.id, action: 'employee.create', entity: 'User', entityId: user.id, metadata: { email: user.email } } });
+  await prisma.auditLog.create({
+    data: {
+      userId: admin.id,
+      action: 'employee.create',
+      entity: 'User',
+      entityId: user.id,
+      metadata: { email: user.email, role: role.name, jobTitle: d.jobTitle || null } as never,
+    },
+  });
   return NextResponse.json({ ok: true, id: user.id });
 });

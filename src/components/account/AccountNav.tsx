@@ -12,6 +12,7 @@ export function AccountNav({ locale, dict }: { locale: Locale; dict: Dict }) {
   const items = [
     { href: base, label: dict.account.overview },
     { href: `${base}/orders`, label: dict.account.orders },
+    { href: `${base}/membership`, label: dict.account.membership },
     { href: `${base}/wishlist`, label: dict.account.wishlist },
     { href: `${base}/addresses`, label: dict.account.addresses },
     { href: `${base}/measurements`, label: dict.account.measurements },

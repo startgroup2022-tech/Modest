@@ -9,6 +9,7 @@ import { PageHeader, Panel, Kpi, StatusBadge, AdminEmpty } from '@/components/ad
 
 import { Drawer, ActionButton } from '@/components/admin/Filters';
 import { ResourceForm, type FieldDef } from '@/components/admin/ResourceForm';
+import { TailorCredentials } from '@/components/admin/TailorCredentials';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Tailors', robots: { index: false, follow: false } };
@@ -17,13 +18,14 @@ export default async function TailorsPage({ params }: { params: Promise<{ locale
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
-  await requireAdminPage('tailors.view', locale);
+  const admin = await requireAdminPage('tailors.view', locale);
+  const canManageTailors = admin.permissions.has('tailors.manage');
   const dict = getAdminDict(locale);
   const nameLabel = locale === 'ar' ? 'الاسم' : 'Name';
 
   const tailors = await prisma.tailor.findMany({
     orderBy: { nameEn: 'asc' },
-    include: { _count: { select: { tasks: true } } },
+    include: { _count: { select: { tasks: true } }, credential: true },
   });
 
   const fields = (): FieldDef[] => [
@@ -93,6 +95,22 @@ export default async function TailorsPage({ params }: { params: Promise<{ locale
                         <span className="flex flex-wrap items-center gap-2">
                           <Drawer trigger={dict.common.edit} title={dict.common.edit}>
                             <ResourceForm endpoint="/api/admin/tailors" initial={initial} fields={fields()} dict={{ common: dict.common }} transformKey="tailors" />
+                          </Drawer>
+                          <Drawer trigger={locale === 'ar' ? 'بيانات الدخول' : 'Login'} title={locale === 'ar' ? 'بيانات دخول الخياط' : 'Tailor login'}>
+                            <TailorCredentials
+                              tailorId={t.id}
+                              canManage={canManageTailors}
+                              locale={locale}
+                              summary={{
+                                hasCredential: Boolean(t.credential),
+                                username: t.credential?.username ?? null,
+                                isActive: t.credential?.isActive ?? false,
+                                mustChangePassword: t.credential?.mustChangePassword ?? false,
+                                credentialsSentAt: t.credential?.credentialsSentAt?.toISOString() ?? null,
+                                lastPasswordChangeAt: t.credential?.lastPasswordChangeAt?.toISOString() ?? null,
+                                lastLoginAt: t.credential?.lastLoginAt?.toISOString() ?? null,
+                              }}
+                            />
                           </Drawer>
                         </span>
                       </td>

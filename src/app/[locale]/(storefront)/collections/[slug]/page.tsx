@@ -10,6 +10,7 @@ import { ProductGridSkeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
+import { seoTitle, jsonLdHtml } from '@/lib/seo';
 
 export async function generateMetadata({
   params,
@@ -26,7 +27,7 @@ export async function generateMetadata({
     name;
   const path = `/${locale}/collections/${collection.slug}`;
   return {
-    title: name,
+    title: seoTitle(locale === 'ar' ? collection.metaTitleAr : collection.metaTitleEn, name, locale),
     description,
     alternates: {
       canonical: path,
@@ -77,7 +78,7 @@ export default async function CollectionDetailPage({
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdHtml(breadcrumbJsonLd) }} />
 
       {/* Editorial collection hero */}
       <section className="relative bg-ink text-paper">

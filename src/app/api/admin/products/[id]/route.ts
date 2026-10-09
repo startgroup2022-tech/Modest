@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { adminHandler, AdminActionError } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
-import { productSchema } from '../route';
+import { productSchema } from '@/lib/admin/product-schema';
+import { productStatusChangeRequiresApproval } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,16 @@ export const PATCH = adminHandler('products.edit', async ({ admin, req }) => {
   }
   const { categoryIds, collectionIds, slug, ...rest } = parsed.data;
   const nextSlug = slug?.trim() || existing.slug;
+
+  // Publishing is an approval decision: an editor may keep a product in its
+  // current status, but moving it to a different status (ACTIVE, ARCHIVED, …)
+  // requires `products.approve`.
+  if (productStatusChangeRequiresApproval(existing.status, parsed.data.status) && !admin.permissions.has('products.approve')) {
+    return NextResponse.json(
+      { error: 'You cannot change a product status without approval permission', code: 'APPROVAL_REQUIRED' },
+      { status: 403 },
+    );
+  }
 
   if (nextSlug !== existing.slug) {
     const dupe = await prisma.product.findUnique({ where: { slug: nextSlug } });

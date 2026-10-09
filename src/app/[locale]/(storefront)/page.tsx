@@ -2,7 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getHomeSection, getStoreInfo, getSocialLinks } from '@/lib/site';
+import { getHomeSection, getStoreInfo, getSocialLinks, getActivePromotions } from '@/lib/site';
 import { FeaturedProducts, NewArrivalsRail } from '@/components/home/FeaturedProducts';
 import { FeaturedCollections } from '@/components/home/FeaturedCollections';
 import { ArrowRight, InstagramIcon, TikTokIcon, WhatsAppIcon } from '@/components/ui/icons';
@@ -36,14 +36,17 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
   const locale: Locale = raw;
   const dict = getDictionary(locale);
 
-  const [hero, story, madeToOrder, social, store, socials] = await Promise.all([
+  const [hero, story, madeToOrder, social, store, socials, promotions] = await Promise.all([
     getHomeSection('hero'),
     getHomeSection('story'),
     getHomeSection('made_to_order'),
     getHomeSection('social'),
     getStoreInfo(),
     getSocialLinks(),
+    getActivePromotions(),
   ]);
+
+  const banners = promotions.filter((p) => p.placement === 'home_banner');
 
   const heroTitle = locale === 'ar' ? hero?.titleAr : hero?.titleEn;
   const heroBody = locale === 'ar' ? hero?.bodyAr : hero?.bodyEn;
@@ -107,6 +110,34 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
           </div>
         </div>
       </section>
+
+      {/* ── ADMIN BANNERS (Promotions → home_banner) ──── */}
+      {banners.map((b) => {
+        const title = locale === 'ar' ? b.titleAr : b.titleEn;
+        const body = (locale === 'ar' ? b.bodyAr : b.bodyEn) ?? '';
+        const cta = locale === 'ar' ? b.ctaLabelAr : b.ctaLabelEn;
+        return (
+          <section key={b.id} aria-label={title} className="border-b border-line bg-ink text-paper">
+            <div className="shell grid items-center gap-8 py-12 md:grid-cols-2 md:py-16">
+              <div>
+                <h2 className="text-h2 text-paper">{title}</h2>
+                {body ? <p className="mt-4 max-w-md whitespace-pre-line text-body text-paper/70">{body}</p> : null}
+                {b.ctaHref ? (
+                  <Link href={b.ctaHref} className="btn mt-7 border border-paper bg-transparent text-paper hover:bg-paper hover:text-ink">
+                    {cta ?? dict.home.viewAll}
+                    <ArrowRight className="h-4 w-4 rtl:rotate-180" />
+                  </Link>
+                ) : null}
+              </div>
+              {b.imageUrl ? (
+                <div className="relative aspect-[4/3] w-full overflow-hidden">
+                  <Image src={b.imageUrl} alt={title} fill sizes="(max-width: 767px) 100vw, 50vw" className="object-cover" />
+                </div>
+              ) : null}
+            </div>
+          </section>
+        );
+      })}
 
       {/* ── FEATURED COLLECTIONS ─────────────────────── */}
       <FeaturedCollections locale={locale} />

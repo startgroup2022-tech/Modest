@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import type { Dict } from '@/i18n/dictionaries';
 import type { Locale } from '@/i18n/config';
+import { safeRedirect as safePath } from '@/lib/redirect-safety';
 
 export function AuthForm({ locale, dict, mode }: { locale: Locale; dict: Dict; mode: 'signin' | 'signup' }) {
   const router = useRouter();
@@ -62,7 +63,7 @@ export function AuthForm({ locale, dict, mode }: { locale: Locale; dict: Dict; m
         setBusy(false);
         return;
       }
-      const target = data.redirect || redirect || `/${locale}/account`;
+      const target = safePath(data.redirect) || safePath(redirect) || `/${locale}/account`;
       router.push(target);
       router.refresh();
     } catch {

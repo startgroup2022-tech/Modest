@@ -34,6 +34,7 @@ export default async function CouponsPage({ params }: { params: Promise<{ locale
     { key: 'maxDiscountBhd', label: p.maxDiscount, type: 'number', step: '0.001' },
     { key: 'usageLimit', label: p.usageLimit, type: 'number' },
     { key: 'perCustomerLimit', label: p.perCustomer, type: 'number' },
+    { key: 'minQualifyingPieces', label: p.minQualifying, type: 'number' },
     { key: 'startsAt', label: p.startsAt, type: 'date' },
     { key: 'expiresAt', label: p.expiresAt, type: 'date' },
     { key: 'descriptionEn', label: `${dict.common.notes} (EN)`, type: 'textarea', full: true },
@@ -44,7 +45,7 @@ export default async function CouponsPage({ params }: { params: Promise<{ locale
 
   const blank = {
     code: '', discountType: 'PERCENTAGE', valueBhd: '', minOrderBhd: '', maxDiscountBhd: '',
-    usageLimit: '', perCustomerLimit: '', startsAt: '', expiresAt: '', descriptionEn: '', descriptionAr: '', isActive: true,
+    usageLimit: '', perCustomerLimit: '', minQualifyingPieces: '', startsAt: '', expiresAt: '', descriptionEn: '', descriptionAr: '', isActive: true,
   };
 
   return (
@@ -83,6 +84,7 @@ export default async function CouponsPage({ params }: { params: Promise<{ locale
                     maxDiscountBhd: c.maxDiscountBhd == null ? '' : String(c.maxDiscountBhd),
                     usageLimit: c.usageLimit == null ? '' : String(c.usageLimit),
                     perCustomerLimit: c.perCustomerLimit == null ? '' : String(c.perCustomerLimit),
+                    minQualifyingPieces: c.minQualifyingPieces == null ? '' : String(c.minQualifyingPieces),
                     startsAt: c.startsAt ? c.startsAt.toISOString().slice(0, 10) : '',
                     expiresAt: c.expiresAt ? c.expiresAt.toISOString().slice(0, 10) : '',
                     descriptionEn: c.descriptionEn ?? '', descriptionAr: c.descriptionAr ?? '', isActive: c.isActive,

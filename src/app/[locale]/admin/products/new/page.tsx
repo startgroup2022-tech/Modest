@@ -16,13 +16,14 @@ export default async function NewProductPage({ params }: { params: Promise<{ loc
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
-  await requireAdminPage('products.create', locale);
+  const admin = await requireAdminPage('products.create', locale);
   const dict = getAdminDict(locale);
   const href = (p: string) => adminHref(locale, p);
 
-  const [categories, collections] = await Promise.all([
+  const [categories, collections, cuts] = await Promise.all([
     prisma.category.findMany({ orderBy: { sortOrder: 'asc' } }),
     prisma.collection.findMany({ orderBy: { sortOrder: 'asc' } }),
+    prisma.productCut.findMany({ where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }] }),
   ]);
 
   return (
@@ -40,9 +41,11 @@ export default async function NewProductPage({ params }: { params: Promise<{ loc
         <ProductForm
           initial={emptyProduct}
           locale={locale}
+          canApprove={admin.permissions.has('products.approve')}
           dict={{ products: dict.products, common: dict.common }}
           categories={categories.map((c) => ({ id: c.id, name: locale === 'ar' ? c.nameAr : c.nameEn }))}
           collections={collections.map((c) => ({ id: c.id, name: locale === 'ar' ? c.nameAr : c.nameEn }))}
+          cuts={cuts.map((c) => ({ id: c.id, code: c.code, name: locale === 'ar' ? c.nameAr : c.nameEn }))}
         />
       </Panel>
     </>

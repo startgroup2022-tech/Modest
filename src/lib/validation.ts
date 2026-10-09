@@ -34,6 +34,21 @@ export const signUpSchema = z
     path: ['confirmPassword'],
   });
 
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required').max(128),
+    newPassword: passwordSchema,
+    confirmPassword: z.string(),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  })
+  .refine((d) => d.newPassword !== d.currentPassword, {
+    message: 'Choose a password different from your current one',
+    path: ['newPassword'],
+  });
+
 const phoneRegex = /^[+]?[\d\s()-]{7,20}$/;
 
 export const checkoutSchema = z.object({
@@ -70,6 +85,10 @@ export const addressSchema = z.object({
 });
 
 export const measurementSchema = z.object({
+  id: z.string().min(1).max(64).optional(),
+  // When true the client is explicitly adding a new profile, so the API must
+  // create rather than fall back to updating the caller's default profile.
+  create: z.boolean().optional(),
   name: z.string().trim().max(60).optional().or(z.literal('')),
   unit: z.enum(['cm', 'in']).default('cm'),
   height: z.coerce.number().positive().max(300).optional().nullable(),
@@ -81,6 +100,7 @@ export const measurementSchema = z.object({
   armhole: z.coerce.number().positive().max(200).optional().nullable(),
   length: z.coerce.number().positive().max(300).optional().nullable(),
   notes: z.string().trim().max(500).optional().or(z.literal('')),
+  isDefault: z.boolean().optional(),
 });
 
 export const profileSchema = z.object({

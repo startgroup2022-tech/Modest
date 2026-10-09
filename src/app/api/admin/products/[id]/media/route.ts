@@ -6,7 +6,11 @@ import { prisma } from '@/lib/prisma';
 export const dynamic = 'force-dynamic';
 
 const schema = z.object({
-  url: z.string().url().max(2000),
+  // Accepts an absolute URL or a site-relative upload path (/uploads/…).
+  url: z
+    .string()
+    .max(2000)
+    .refine((v) => /^(https?:\/\/|\/)[^\s]*$/i.test(v), { message: 'Invalid media URL' }),
   altEn: z.string().max(300).optional().default(''),
   altAr: z.string().max(300).optional().default(''),
   isPrimary: z.boolean().optional().default(false),

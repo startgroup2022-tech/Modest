@@ -22,10 +22,19 @@ export function BrandMark({ className }: BrandMarkProps) {
   );
 }
 
-export function Logo({ href, className }: { href: string; className?: string }) {
+export function Logo({ href, className, logoUrl }: { href: string; className?: string; logoUrl?: string | null }) {
   return (
     <Link href={href} aria-label="Attention — home" className={clsx('inline-flex items-center', className)}>
-      <BrandMark className="text-[1.05rem] sm:text-[1.15rem]" />
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl}
+          alt="Attention"
+          className="h-7 w-auto max-w-[180px] object-contain sm:h-8"
+        />
+      ) : (
+        <BrandMark className="text-[1.05rem] sm:text-[1.15rem]" />
+      )}
     </Link>
   );
 }

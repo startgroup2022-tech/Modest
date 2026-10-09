@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
+import { listActiveCuts } from '@/lib/size-guide-db';
 import { WhatsAppIcon } from '@/components/ui/icons';
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -16,24 +17,6 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
     alternates: { canonical: path, languages: { en: '/en/size-guide', ar: '/ar/size-guide', 'x-default': '/en/size-guide' } },
   };
 }
-
-const BODY_TABLE = [
-  { size: 'XS', bust: '80–84', waist: '62–66', hip: '86–90' },
-  { size: 'S', bust: '84–88', waist: '66–70', hip: '90–94' },
-  { size: 'M', bust: '88–92', waist: '70–74', hip: '94–98' },
-  { size: 'L', bust: '92–97', waist: '74–79', hip: '98–103' },
-  { size: 'XL', bust: '97–102', waist: '79–85', hip: '103–108' },
-  { size: 'XXL', bust: '102–108', waist: '85–91', hip: '108–114' },
-];
-
-const GARMENT_TABLE = [
-  { size: 'XS', length: '132', shoulder: '37', sleeve: '56' },
-  { size: 'S', length: '134', shoulder: '38', sleeve: '57' },
-  { size: 'M', length: '136', shoulder: '39', sleeve: '58' },
-  { size: 'L', length: '138', shoulder: '40', sleeve: '59' },
-  { size: 'XL', length: '140', shoulder: '41', sleeve: '60' },
-  { size: 'XXL', length: '142', shoulder: '42', sleeve: '61' },
-];
 
 const CONVERSION_TABLE = [
   { attention: 'XS', eu: '34', uk: '6', us: '2' },
@@ -50,6 +33,7 @@ export default async function SizeGuidePage({ params }: { params: Promise<{ loca
   const locale: Locale = raw;
   const dict = getDictionary(locale);
   const ar = locale === 'ar';
+  const cuts = await listActiveCuts();
 
   const measures = [
     dict.sizeGuide.measureBust,
@@ -61,8 +45,9 @@ export default async function SizeGuidePage({ params }: { params: Promise<{ loca
     dict.sizeGuide.measureHeight,
   ];
 
-  const tableHead = [dict.sizeGuide.columnSize, dict.sizeGuide.columnBust, dict.sizeGuide.columnWaist, dict.sizeGuide.columnHip];
-  const garmentHead = [dict.sizeGuide.columnSize, dict.sizeGuide.columnLength, ar ? 'الكتف' : 'Shoulder', ar ? 'الكم' : 'Sleeve'];
+  const measurementIntro = ar
+    ? 'القياسات المعروضة أدناه مأخوذة على القطعة مفرودة (نصف المحيط) بوحدة الإنش، وفق مواصفات كل قَصّة. تُدار هذه الجداول من لوحة التحكم وتُحدَّث مباشرة هنا.'
+    : 'The measurements below are taken across the garment when laid flat (half circumference), in inches, per silhouette. These charts are managed from Admin and update here immediately.';
 
   return (
     <div className="shell py-12 md:py-20">
@@ -86,56 +71,60 @@ export default async function SizeGuidePage({ params }: { params: Promise<{ loca
           </section>
 
           <section>
-            <h2 className="text-h2">{dict.sizeGuide.bodyTitle}</h2>
-            <div className="mt-6 overflow-x-auto">
-              <table className="w-full min-w-[520px] border-collapse text-small">
-                <thead>
-                  <tr className="border-b border-ink text-start">
-                    {tableHead.map((h) => (
-                      <th key={h} className="py-3 pe-4 text-start text-caption uppercase tracking-[0.12em] text-ink-muted">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {BODY_TABLE.map((r) => (
-                    <tr key={r.size} className="border-b border-line">
-                      <td className="py-3 pe-4 font-medium">{r.size}</td>
-                      <td className="py-3 pe-4 tabular-nums text-ink-muted">{r.bust}</td>
-                      <td className="py-3 pe-4 tabular-nums text-ink-muted">{r.waist}</td>
-                      <td className="py-3 pe-4 tabular-nums text-ink-muted">{r.hip}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section>
-            <h2 className="text-h2">{dict.sizeGuide.garmentTitle}</h2>
-            <div className="mt-6 overflow-x-auto">
-              <table className="w-full min-w-[520px] border-collapse text-small">
-                <thead>
-                  <tr className="border-b border-ink">
-                    {garmentHead.map((h) => (
-                      <th key={h} className="py-3 pe-4 text-start text-caption uppercase tracking-[0.12em] text-ink-muted">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {GARMENT_TABLE.map((r) => (
-                    <tr key={r.size} className="border-b border-line">
-                      <td className="py-3 pe-4 font-medium">{r.size}</td>
-                      <td className="py-3 pe-4 tabular-nums text-ink-muted">{r.length}</td>
-                      <td className="py-3 pe-4 tabular-nums text-ink-muted">{r.shoulder}</td>
-                      <td className="py-3 pe-4 tabular-nums text-ink-muted">{r.sleeve}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <h2 className="text-h2">{ar ? 'جداول القَصّات' : 'Silhouette charts'}</h2>
+            <p className="mt-3 max-w-2xl text-small text-ink-muted">{measurementIntro}</p>
+            <div className="mt-8 space-y-12">
+              {cuts.length === 0 ? (
+                <p className="border border-line px-5 py-6 text-small text-ink-muted">
+                  {ar ? 'لم تُنشَر جداول القياسات بعد.' : 'Measurement charts are not published yet.'}
+                </p>
+              ) : (
+                cuts.map((cut) => (
+                  <div key={cut.id}>
+                    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                      <h3 className="text-h3">{ar ? cut.cutNameAr : cut.cutNameEn}</h3>
+                      <span className="font-mono text-caption uppercase tracking-[0.12em] text-ink-faint">
+                        {cut.cutCode} · {cut.unit}
+                      </span>
+                    </div>
+                    {(ar ? cut.descriptionAr : cut.descriptionEn) ? (
+                      <p className="mt-1 text-small text-ink-muted">{ar ? cut.descriptionAr : cut.descriptionEn}</p>
+                    ) : null}
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full min-w-[520px] border-collapse text-small">
+                        <thead>
+                          <tr className="border-b border-ink">
+                            <th className="py-3 pe-4 text-start text-caption uppercase tracking-[0.12em] text-ink-muted">
+                              {dict.sizeGuide.columnSize}
+                            </th>
+                            {cut.fields.map((f) => (
+                              <th
+                                key={f.key}
+                                className="py-3 pe-4 text-start text-caption uppercase tracking-[0.12em] text-ink-muted"
+                              >
+                                {ar ? f.labelAr : f.labelEn}
+                                <span className="ms-1 normal-case tracking-normal text-ink-faint">({f.unit})</span>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cut.sizes.map((size) => (
+                            <tr key={size} className="border-b border-line">
+                              <td className="py-3 pe-4 font-medium">{size}</td>
+                              {cut.fields.map((f) => (
+                                <td key={f.key} className="py-3 pe-4 tabular-nums text-ink-muted">
+                                  {cut.matrix[f.key]?.[size] ?? '—'}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </section>
 

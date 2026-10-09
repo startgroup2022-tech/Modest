@@ -19,7 +19,7 @@ export default async function ExpensesPage({ params }: { params: Promise<{ local
   const locale: Locale = raw;
   const admin = await requireAdminPage('expenses.view', locale);
   const dict = getAdminDict(locale);
-  const canApprove = admin.permissions.has('finance.approve');
+  const canApprove = admin.permissions.has('expenses.approve');
 
   const [expenses, categories, totals] = await Promise.all([
     prisma.expense.findMany({

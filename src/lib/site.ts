@@ -15,6 +15,10 @@ export interface StoreInfo {
   timezone: string;
   leadTimeEn: string;
   leadTimeAr: string;
+  /** Admin-uploaded wordmark; falls back to the typographic brand mark. */
+  logoUrl: string;
+  /** Admin-uploaded favicon; falls back to the built-in icon.svg. */
+  faviconUrl: string;
 }
 
 const FALLBACK_STORE: StoreInfo = {
@@ -30,6 +34,8 @@ const FALLBACK_STORE: StoreInfo = {
   timezone: 'Asia/Bahrain',
   leadTimeEn: 'Please allow 2–3 weeks for processing.',
   leadTimeAr: 'يُرجى منح 2–3 أسابيع للمعالجة.',
+  logoUrl: '',
+  faviconUrl: '',
 };
 
 export const getStoreInfo = cache(async (): Promise<StoreInfo> => {

@@ -79,3 +79,66 @@ const MESSAGES: Record<string, { en: string; ar: string }> = {
 export function statusMessage(status: OrderStatus): { en: string; ar: string } {
   return MESSAGES[status] ?? { en: status, ar: status };
 }
+
+/**
+ * Stable dictionary keys for the customer-facing order status label. Kept here
+ * (rather than duplicated in each page) so a new status can never render as a
+ * raw enum in one place and a translated label in another.
+ */
+export const ORDER_STATUS_KEY: Record<OrderStatus, string> = {
+  PENDING: 'placed',
+  CONFIRMED: 'confirmed',
+  PREPARING: 'preparing',
+  IN_PRODUCTION: 'inProduction',
+  QUALITY_CHECK: 'qualityCheck',
+  READY: 'ready',
+  SHIPPED: 'shipped',
+  DELIVERED: 'delivered',
+  CANCELLED: 'cancelled',
+  REFUND_REQUESTED: 'refundRequested',
+  REFUNDED: 'refunded',
+};
+
+export function customerStatusKey(status: OrderStatus): string {
+  return ORDER_STATUS_KEY[status] ?? 'placed';
+}
+
+/** Stable dictionary keys for the customer-facing payment status label. */
+export const PAYMENT_STATUS_KEY: Record<string, string> = {
+  INITIATED: 'paymentInitiated',
+  PENDING: 'paymentPending',
+  PAID: 'paymentPaid',
+  FAILED: 'paymentFailed',
+  CANCELLED: 'paymentCancelled',
+  REFUNDED: 'paymentRefunded',
+  PARTIALLY_REFUNDED: 'paymentPartiallyRefunded',
+};
+
+export function customerPaymentStatusKey(status: string): string {
+  return PAYMENT_STATUS_KEY[status] ?? 'paymentPending';
+}
+
+/** Statuses a customer may see on their own timeline. Internal workflow states
+ * (e.g. QC, settlement) are never part of this set. */
+const CUSTOMER_TIMELINE_STATUSES = new Set<string>([...ORDER_TIMELINE, 'CANCELLED', 'REFUNDED', 'REFUND_REQUESTED']);
+
+/**
+ * Projects the raw order events onto a customer-safe timeline. Message text is
+ * always replaced with the canonical localised copy for the status, so an
+ * employee-only note stored on an event can never reach the storefront, and any
+ * status outside the customer-safe set is dropped. The earliest occurrence of a
+ * status wins (events arrive oldest-first).
+ */
+export function toCustomerTimeline(
+  events: { status: string; createdAt: Date }[],
+): { status: string; messageEn: string; messageAr: string; createdAt: Date }[] {
+  const seen = new Set<string>();
+  const out: { status: string; messageEn: string; messageAr: string; createdAt: Date }[] = [];
+  for (const e of events) {
+    if (!CUSTOMER_TIMELINE_STATUSES.has(e.status) || seen.has(e.status)) continue;
+    seen.add(e.status);
+    const msg = statusMessage(e.status as OrderStatus);
+    out.push({ status: e.status, messageEn: msg.en, messageAr: msg.ar, createdAt: e.createdAt });
+  }
+  return out;
+}

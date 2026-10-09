@@ -21,6 +21,9 @@ export interface ProductFormData {
   compareAtBhd: string;
   status: string;
   kind: string;
+  cutId: string;
+  tailorFeeBhd: string;
+  showAvailability: boolean;
   isFeatured: boolean;
   isNewArrival: boolean;
   madeToOrder: boolean;
@@ -53,6 +56,9 @@ export const emptyProduct: ProductFormData = {
   compareAtBhd: '',
   status: 'DRAFT',
   kind: 'READY_TO_WEAR',
+  cutId: '',
+  tailorFeeBhd: '',
+  showAvailability: true,
   isFeatured: false,
   isNewArrival: false,
   madeToOrder: false,
@@ -74,14 +80,19 @@ export function ProductForm({
   initial,
   categories,
   collections,
+  cuts,
   dict,
   locale,
+  canApprove = true,
 }: {
   initial: ProductFormData;
   categories: { id: string; name: string }[];
   collections: { id: string; name: string }[];
+  cuts: { id: string; name: string; code: string }[];
   dict: Record<string, Record<string, string>>;
   locale: 'en' | 'ar';
+  /** When false, the status control is locked to the product's current value. */
+  canApprove?: boolean;
 }) {
   const router = useRouter();
   const p = dict.products;
@@ -106,6 +117,8 @@ export function ProductForm({
         ...data,
         priceBhd: Number(data.priceBhd),
         compareAtBhd: data.compareAtBhd ? Number(data.compareAtBhd) : null,
+        cutId: data.cutId || null,
+        tailorFeeBhd: data.tailorFeeBhd ? Number(data.tailorFeeBhd) : null,
         leadTimeMinDays: Number(data.leadTimeMinDays),
         leadTimeMaxDays: Number(data.leadTimeMaxDays),
         lowStockThreshold: Number(data.lowStockThreshold),
@@ -194,11 +207,23 @@ export function ProductForm({
           {field(c.sku, 'sku')}
           <label className="block">
             <span className="adm-kpi-label">{p.status}</span>
-            <select value={data.status} onChange={(e) => set('status', e.target.value)} className="adm-select mt-1">
-              <option value="DRAFT">{locale === 'ar' ? 'مسودة' : 'Draft'}</option>
+            <select
+              value={data.status}
+              onChange={(e) => set('status', e.target.value)}
+              disabled={!canApprove}
+              className="adm-select mt-1 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="DRAFT">{locale === 'ar' ? 'مسودة (غير منشور)' : 'Draft (unpublished)'}</option>
               <option value="ACTIVE">{locale === 'ar' ? 'نشط' : 'Active'}</option>
+              <option value="PREORDER">{locale === 'ar' ? 'طلب مسبق' : 'Preorder'}</option>
+              <option value="UNAVAILABLE">{locale === 'ar' ? 'غير متاح (منشور)' : 'Unavailable (published)'}</option>
               <option value="ARCHIVED">{locale === 'ar' ? 'مؤرشف' : 'Archived'}</option>
             </select>
+            {!canApprove && (
+              <span className="mt-1 block text-caption text-ink-faint">
+                {locale === 'ar' ? 'تغيير حالة النشر يتطلب صلاحية الاعتماد' : 'Changing publish status requires approval permission'}
+              </span>
+            )}
           </label>
           <label className="block">
             <span className="adm-kpi-label">{p.kind}</span>
@@ -206,6 +231,22 @@ export function ProductForm({
               <option value="READY_TO_WEAR">{locale === 'ar' ? 'جاهز للارتداء' : 'Ready to wear'}</option>
               <option value="MADE_TO_ORDER">{locale === 'ar' ? 'حسب الطلب' : 'Made to order'}</option>
             </select>
+          </label>
+          <label className="block">
+            <span className="adm-kpi-label">{locale === 'ar' ? 'القَصّة / القوام' : 'Silhouette / cut'}</span>
+            <select value={data.cutId} onChange={(e) => set('cutId', e.target.value)} className="adm-select mt-1">
+              <option value="">{locale === 'ar' ? 'بدون قياسات' : 'No measurements'}</option>
+              {cuts.map((cut) => (
+                <option key={cut.id} value={cut.id}>
+                  {cut.name}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-caption text-ink-faint">
+              {locale === 'ar'
+                ? 'تحدد القَصّة حقول القياسات المتاحة على صفحة المنتج.'
+                : 'The cut drives the measurement fields shown on the product page.'}
+            </span>
           </label>
           <div className="flex flex-wrap items-center gap-5 sm:col-span-2">
             {check(p.featured, 'isFeatured')}
@@ -267,6 +308,10 @@ export function ProductForm({
           {field(p.priceBhd, 'priceBhd', 'number')}
           {field(p.compareAtBhd, 'compareAtBhd', 'number')}
           {field(p.lowStockThreshold, 'lowStockThreshold', 'number')}
+          {field(locale === 'ar' ? 'أجرة الخياط (د.ب)' : 'Tailor fee (BHD)', 'tailorFeeBhd', 'number')}
+          <div className="flex items-end pb-2">
+            {check(locale === 'ar' ? 'إظهار الكمية المتبقية' : 'Show remaining quantity', 'showAvailability')}
+          </div>
         </div>
       )}
 

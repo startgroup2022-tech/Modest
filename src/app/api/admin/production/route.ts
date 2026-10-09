@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { adminHandler } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
+import { nextSequence } from '@/lib/sequences';
+import { resolveTailorFee, TailorFeeError } from '@/lib/tailor-fees';
+import { assertOrderSettledForProduction } from '@/lib/production-gate';
+import { applyAssignmentSideEffects } from '@/lib/assignments';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,37 +19,103 @@ const schema = z.object({
   priority: z.enum(['LOW', 'NORMAL', 'HIGH', 'URGENT']).default('NORMAL'),
   dueDate: z.string().optional().default(''),
   notes: z.string().max(4000).optional().default(''),
+  // Explicit fee from an authorised workflow; required when the product has no
+  // configured fee and a tailor is being assigned.
+  feeBhd: z.number().min(0).max(100_000).optional(),
 });
-
-function nextCode() {
-  return `TSK-${Date.now().toString(36).toUpperCase()}`;
-}
 
 export const POST = adminHandler('production.manage', async ({ admin, req }) => {
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Validation failed', issues: parsed.error.issues }, { status: 422 });
   const d = parsed.data;
+
+  // Assigning a tailor to a task is a distinct authority from managing the
+  // production queue; require `orders.assign` when a tailor is named.
+  if (d.tailorId && !admin.permissions.has('orders.assign')) {
+    return NextResponse.json({ error: 'You cannot assign tailors', code: 'ASSIGN_FORBIDDEN' }, { status: 403 });
+  }
+
   const order = await prisma.order.findUnique({ where: { id: d.orderId } });
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
+  // Production work may not be created for an unpaid order. This is the same
+  // invariant enforced on the status transition and on tailor assignment, so a
+  // direct API call cannot start manufacturing before money is captured.
+  try {
+    await assertOrderSettledForProduction(order.id);
+  } catch {
+    return NextResponse.json(
+      { error: 'Payment must be confirmed before production can begin', code: 'PAYMENT_REQUIRED' },
+      { status: 409 },
+    );
+  }
+
+  const product = d.productId
+    ? await prisma.product.findUnique({ where: { id: d.productId }, select: { tailorFeeBhd: true } })
+    : null;
+
+  // Freeze the fee whenever a tailor is assigned. No hidden fallback: if no
+  // fee can be resolved the request fails rather than inventing a value.
+  let feeBhd: number | null = null;
+  if (d.tailorId) {
+    try {
+      feeBhd = resolveTailorFee({
+        productFeeBhd: product?.tailorFeeBhd != null ? Number(product.tailorFeeBhd) : null,
+        suppliedFeeBhd: d.feeBhd ?? null,
+      });
+    } catch (err) {
+      if (err instanceof TailorFeeError) {
+        return NextResponse.json({ error: err.message, code: err.code }, { status: 422 });
+      }
+      throw err;
+    }
+  }
+
   const due = d.dueDate ? new Date(d.dueDate) : null;
-  const task = await prisma.productionTask.create({
-    data: {
-      code: nextCode(),
-      orderId: d.orderId,
-      orderItemId: d.orderItemId || null,
-      productId: d.productId || null,
+
+  // Creating a task and its assignment side-effects (order-item mirror + the
+  // tailor's `production.assigned` notification) happen in one transaction, so a
+  // notification can never be emitted for a task that did not commit.
+  const task = await prisma.$transaction(async (tx) => {
+    const code = await nextSequence(tx, { key: 'production', prefix: 'PRD', pad: 6 });
+    const created = await tx.productionTask.create({
+      data: {
+        code,
+        orderId: d.orderId,
+        orderItemId: d.orderItemId || null,
+        productId: d.productId || null,
+        tailorId: d.tailorId || null,
+        titleEn: d.titleEn,
+        titleAr: d.titleAr || null,
+        priority: d.priority,
+        status: d.tailorId ? 'ASSIGNED' : 'PENDING',
+        feeBhd,
+        dueDate: due && !Number.isNaN(due.getTime()) ? due : null,
+        notes: d.notes || null,
+        createdById: admin.id,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: { userId: admin.id, action: 'production.create', entity: 'ProductionTask', entityId: created.id, metadata: { orderId: d.orderId, feeBhd } as never },
+    });
+
+    // Mirror the assignment onto the order item and tell the tailor. The helper
+    // is the single emission point shared with the per-piece service.
+    await applyAssignmentSideEffects(tx, {
+      taskId: created.id,
+      taskCode: created.code,
       tailorId: d.tailorId || null,
+      previousTailorId: null,
+      orderItemId: d.orderItemId || null,
+      feeBhd: d.tailorId ? feeBhd : null,
       titleEn: d.titleEn,
       titleAr: d.titleAr || null,
-      priority: d.priority,
-      status: d.tailorId ? 'ASSIGNED' : 'PENDING',
-      dueDate: due && !Number.isNaN(due.getTime()) ? due : null,
-      notes: d.notes || null,
-      createdById: admin.id,
-    },
+    });
+
+    return created;
   });
-  await prisma.auditLog.create({ data: { userId: admin.id, action: 'production.create', entity: 'ProductionTask', entityId: task.id, metadata: { orderId: d.orderId } } });
+
   return NextResponse.json({ ok: true, id: task.id, code: task.code });
 });

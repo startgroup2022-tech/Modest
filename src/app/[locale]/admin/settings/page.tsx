@@ -8,7 +8,10 @@ import { isLocale, type Locale } from '@/i18n/config';
 import { PageHeader, Panel, Tabs, AdminEmpty } from '@/components/admin/ui';
 import { SettingForm, type SettingField } from '@/components/admin/SettingForm';
 import { CurrencyManager } from '@/components/admin/CurrencyManager';
+import { PaymentMethodManager } from '@/components/admin/PaymentMethodManager';
+import { getPaymentConfigs } from '@/lib/payment-config';
 import { maskSecret } from '@/lib/admin/settings';
+import { SizeGuideManager, type CutRow } from '@/components/admin/catalog/SizeGuideManager';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = { title: 'Settings', robots: { index: false, follow: false } };
@@ -25,7 +28,7 @@ export default async function SettingsPage({
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale: Locale = raw;
-  await requireAdminPage('settings.view', locale);
+  const admin = await requireAdminPage('settings.view', locale);
   const dict = getAdminDict(locale);
   const s = dict.settings;
   const sp = await searchParams;
@@ -37,6 +40,50 @@ export default async function SettingsPage({
     return (row?.value as Json) ?? {};
   };
   const currencies = await prisma.currency.findMany({ orderBy: { sortOrder: 'asc' } });
+  const paymentConfigs = await getPaymentConfigs();
+
+  const cuts = await prisma.productCut.findMany({
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    include: {
+      sizeCharts: { include: { values: true } },
+      fields: { orderBy: { sortOrder: 'asc' } },
+    },
+  });
+  const cutRows: CutRow[] = cuts.map((cut) => {
+    const chart = cut.sizeCharts[0] ?? null;
+    const sizes = chart
+      ? [...new Set(chart.values.map((v) => v.sizeCode))].sort(
+          (a, b) => ['XS', 'S', 'M', 'L', 'XL'].indexOf(a) - ['XS', 'S', 'M', 'L', 'XL'].indexOf(b),
+        )
+      : [];
+    return {
+      id: cut.id,
+      code: cut.code,
+      nameEn: cut.nameEn,
+      nameAr: cut.nameAr,
+      descriptionEn: cut.descriptionEn,
+      descriptionAr: cut.descriptionAr,
+      isActive: cut.isActive,
+      sortOrder: cut.sortOrder,
+      sizes,
+      fields: cut.fields.map((f) => ({
+        id: f.id,
+        key: f.key,
+        labelEn: f.labelEn,
+        labelAr: f.labelAr,
+        unit: f.unit,
+        minValue: f.minValue != null ? Number(f.minValue) : null,
+        maxValue: f.maxValue != null ? Number(f.maxValue) : null,
+        helperEn: f.helperEn,
+        helperAr: f.helperAr,
+        isActive: f.isActive,
+        sortOrder: f.sortOrder,
+        values: Object.fromEntries(
+          (chart?.values ?? []).filter((v) => v.fieldId === f.id).map((v) => [v.sizeCode, Number(v.value)]),
+        ),
+      })),
+    };
+  });
 
   const store = get('store');
   const checkout = get('checkout');
@@ -53,6 +100,20 @@ export default async function SettingsPage({
     { key: 'city', label: s.city },
     { key: 'country', label: s.country },
     { key: 'timezone', label: s.timezone },
+    {
+      key: 'logoUrl',
+      label: locale === 'ar' ? 'الشعار' : 'Logo',
+      type: 'image',
+      full: true,
+      help: locale === 'ar' ? 'اتركه فارغًا لاستخدام شعار النص.' : 'Leave empty to use the typographic wordmark.',
+    },
+    {
+      key: 'faviconUrl',
+      label: locale === 'ar' ? 'أيقونة الموقع' : 'Favicon',
+      type: 'image',
+      full: true,
+      help: locale === 'ar' ? 'اتركه فارغًا للأيقونة الافتراضية.' : 'Leave empty for the built-in icon.',
+    },
     { key: 'leadTimeEn', label: s.leadTimeEn, type: 'textarea', full: true },
     { key: 'leadTimeAr', label: s.leadTimeAr, type: 'textarea', full: true },
   ];
@@ -65,27 +126,24 @@ export default async function SettingsPage({
     { key: 'enableOrderNotes', label: locale === 'ar' ? 'تفعيل ملاحظات الطلب' : 'Enable order notes', type: 'checkbox' },
   ];
 
-  const paymentFields: SettingField[] = [
-    { key: 'enableCod', label: s.enableCod, type: 'checkbox' },
-    { key: 'enableBank', label: s.enableBank, type: 'checkbox' },
-    { key: 'enableBenefit', label: s.enableBenefit, type: 'checkbox' },
-    { key: 'enableTapp', label: s.enableTapp, type: 'checkbox' },
-  ];
-
   const bankFields: SettingField[] = [
     { key: 'bankName', label: dict.system.bankName },
     { key: 'accountName', label: dict.system.accountName },
     { key: 'iban', label: dict.system.iban },
+    { key: 'accountNumber', label: dict.system.accountNumber },
+    { key: 'instructionsEn', label: s.instructionsEn, type: 'textarea', full: true },
+    { key: 'instructionsAr', label: s.instructionsAr, type: 'textarea', full: true },
   ];
 
   const benefitFields: SettingField[] = [
     { key: 'alias', label: dict.system.alias },
     { key: 'accountNumber', label: dict.system.accountNumber },
     { key: 'accountName', label: dict.system.accountName },
+    { key: 'instructionsEn', label: s.instructionsEn, type: 'textarea', full: true },
+    { key: 'instructionsAr', label: s.instructionsAr, type: 'textarea', full: true },
   ];
 
   const tappFields: SettingField[] = [
-    { key: 'enabled', label: dict.common.enabled, type: 'checkbox' },
     { key: 'environment', label: dict.system.environment, placeholder: 'sandbox' },
     { key: 'baseUrl', label: dict.system.baseUrl, type: 'url' },
     { key: 'merchantId', label: dict.system.merchantId },
@@ -98,9 +156,10 @@ export default async function SettingsPage({
     { key: 'payments', label: s.payments, href: `?tab=payments` },
     { key: 'shipping', label: s.shipping, href: `?tab=shipping` },
     { key: 'currencies', label: s.currencies, href: `?tab=currencies` },
+    { key: 'sizeguide', label: locale === 'ar' ? 'دليل القياسات' : 'Size guide', href: `?tab=sizeguide` },
   ];
 
-  const canEdit = true;
+  const canEdit = admin.permissions.has('settings.edit');
 
   return (
     <>
@@ -110,7 +169,7 @@ export default async function SettingsPage({
       {tab === 'general' && (
         <div className="grid gap-6">
           <Panel title={s.store}>
-            <SettingForm settingKey="store" initial={store} fields={storeFields} dict={{ common: dict.common, settings: s }} />
+            <SettingForm settingKey="store" initial={store} fields={storeFields} dict={{ common: dict.common, settings: s }} locale={locale} />
           </Panel>
           <Panel title={s.checkout}>
             <SettingForm settingKey="checkout" initial={checkout} fields={checkoutFields} dict={{ common: dict.common, settings: s }} />
@@ -120,8 +179,33 @@ export default async function SettingsPage({
 
       {tab === 'payments' && (
         <div className="grid gap-6">
-          <Panel title={s.payments}>
-            <SettingForm settingKey="payments" initial={{ enableCod: true, enableBank: true, enableBenefit: true, enableTapp: false, ...get('payments') }} fields={paymentFields} dict={{ common: dict.common, settings: s }} />
+          <Panel title={s.methods}>
+            <p className="mb-4 text-caption text-ink-faint">{s.methodsHint}</p>
+            <PaymentMethodManager
+              configs={(['COD', 'BANK_TRANSFER', 'BENEFIT', 'TAPP'] as const).map((m) => paymentConfigs[m])}
+              locale={locale}
+              labels={{
+                methodEnabled: s.methodEnabled,
+                methodVisible: s.methodVisible,
+                methodLabelEn: s.methodLabelEn,
+                methodLabelAr: s.methodLabelAr,
+                methodDescEn: s.methodDescEn,
+                methodDescAr: s.methodDescAr,
+                instructionsEn: s.instructionsEn,
+                instructionsAr: s.instructionsAr,
+                sortOrder: s.sortOrder,
+                minOrder: s.minOrder,
+                maxOrder: s.maxOrder,
+                saveMethods: s.saveMethods,
+                saving: dict.common.saving,
+                saved: dict.common.saved,
+                testConnection: s.testConnection,
+                testSuccess: s.testSuccess,
+                testFailed: s.testFailed,
+                testHint: s.testHint,
+              }}
+              canEdit={canEdit}
+            />
           </Panel>
           <div className="grid gap-6 lg:grid-cols-2">
             <Panel title={s.bank}>
@@ -170,6 +254,20 @@ export default async function SettingsPage({
             dict={{ common: dict.common, system: dict.system }}
             canEdit={canEdit}
           />
+        </Panel>
+      )}
+
+      {tab === 'sizeguide' && (
+        <Panel
+          title={locale === 'ar' ? 'دليل القياسات والقَصّات' : 'Size guide & silhouettes'}
+          bodyClassName="p-0"
+        >
+          <p className="px-5 pt-4 text-caption text-ink-faint">
+            {locale === 'ar'
+              ? 'تُدار القَصّات وحقول القياس من هنا، وتظهر مباشرة على صفحات المنتج.'
+              : 'Cuts and measurement fields are managed here and appear directly on product pages.'}
+          </p>
+          <SizeGuideManager cuts={cutRows} locale={locale} canEdit={canEdit} />
         </Panel>
       )}
     </>

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth';
+import { requireUser, hashPassword, verifyPassword } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { addressSchema, measurementSchema, profileSchema } from '@/lib/validation';
+import { addressSchema, changePasswordSchema, measurementSchema, profileSchema } from '@/lib/validation';
+import { rateLimit } from '@/lib/rate-limit';
+import { writeAudit } from '@/lib/audit';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,9 +66,6 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid measurements' }, { status: 400 });
     }
-    const existing = await prisma.measurement.findFirst({
-      where: { customerId: user.customerId, isDefault: true },
-    });
     const data = {
       name: parsed.data.name || 'My measurements',
       unit: parsed.data.unit,
@@ -79,10 +79,63 @@ export async function POST(req: NextRequest) {
       length: parsed.data.length ?? null,
       notes: parsed.data.notes || null,
     };
-    const measurement = existing
-      ? await prisma.measurement.update({ where: { id: existing.id }, data })
-      : await prisma.measurement.create({ data: { customerId: user.customerId, isDefault: true, ...data } });
+
+    // A profile may be edited by id, but only when it belongs to the caller.
+    // Without an id, the caller's default profile is updated in place unless
+    // the request is an explicit "create" (the Add-profile action), which must
+    // always make a new row.
+    const target = parsed.data.id
+      ? await prisma.measurement.findFirst({ where: { id: parsed.data.id, customerId: user.customerId } })
+      : parsed.data.create
+        ? null
+        : await prisma.measurement.findFirst({ where: { customerId: user.customerId, isDefault: true } });
+    if (parsed.data.id && !target) {
+      return NextResponse.json({ error: 'notFound' }, { status: 404 });
+    }
+
+    const count = await prisma.measurement.count({ where: { customerId: user.customerId } });
+    const makeDefault = parsed.data.isDefault ?? (!target && count === 0);
+    if (makeDefault) {
+      await prisma.measurement.updateMany({ where: { customerId: user.customerId }, data: { isDefault: false } });
+    }
+
+    const measurement = target
+      ? await prisma.measurement.update({
+          where: { id: target.id },
+          data: { ...data, ...(makeDefault ? { isDefault: true } : {}) },
+        })
+      : await prisma.measurement.create({
+          data: { customerId: user.customerId, isDefault: makeDefault || count === 0, ...data },
+        });
     return NextResponse.json({ ok: true, measurement });
+  }
+
+  if (kind === 'password') {
+    const ip = clientIp(req);
+    const limit = rateLimit(`password:${user.id}:${ip}`, 6, 15 * 60_000);
+    if (!limit.ok) {
+      return NextResponse.json({ error: 'Too many attempts. Please try again later.' }, { status: 429 });
+    }
+    const parsed = changePasswordSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? 'Invalid password', field: parsed.error.issues[0]?.path?.[0] },
+        { status: 400 },
+      );
+    }
+    // The current password is required and verified server-side; a session
+    // alone is not enough to change the credential.
+    const account = await prisma.user.findUnique({ where: { id: user.id }, select: { passwordHash: true } });
+    if (!account?.passwordHash || !(await verifyPassword(parsed.data.currentPassword, account.passwordHash))) {
+      await writeAudit({ userId: user.id, action: 'account.password_change_failed', entity: 'User', entityId: user.id, metadata: {}, ip });
+      return NextResponse.json({ error: 'Your current password is incorrect', field: 'currentPassword' }, { status: 400 });
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await hashPassword(parsed.data.newPassword) },
+    });
+    await writeAudit({ userId: user.id, action: 'account.password_change', entity: 'User', entityId: user.id, metadata: {}, ip });
+    return NextResponse.json({ ok: true });
   }
 
   if (kind === 'profile') {
@@ -114,8 +167,39 @@ export async function DELETE(req: NextRequest) {
   }
   if (!user.customerId) return unauthenticated();
 
-  const id = new URL(req.url).searchParams.get('id');
+  const url = new URL(req.url);
+  const id = url.searchParams.get('id');
+  const kind = url.searchParams.get('kind');
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-  await prisma.address.deleteMany({ where: { id, customerId: user.customerId } });
+
+  if (kind === 'measurements') {
+    const deleted = await prisma.measurement.deleteMany({ where: { id, customerId: user.customerId } });
+    if (deleted.count === 0) return NextResponse.json({ error: 'notFound' }, { status: 404 });
+    // If the default profile was removed, promote the most recent remaining one.
+    const stillDefault = await prisma.measurement.findFirst({ where: { customerId: user.customerId, isDefault: true } });
+    if (!stillDefault) {
+      const next = await prisma.measurement.findFirst({
+        where: { customerId: user.customerId },
+        orderBy: { updatedAt: 'desc' },
+      });
+      if (next) await prisma.measurement.update({ where: { id: next.id }, data: { isDefault: true } });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  // Scoped by customerId, so another customer's address can never be deleted.
+  // Return 404 when nothing matched, so a stale/foreign id is not reported as a
+  // successful deletion.
+  const deleted = await prisma.address.deleteMany({ where: { id, customerId: user.customerId } });
+  if (deleted.count === 0) return NextResponse.json({ error: 'notFound' }, { status: 404 });
+  // If the default address was removed, promote the most recent remaining one.
+  const stillDefault = await prisma.address.findFirst({ where: { customerId: user.customerId, isDefault: true } });
+  if (!stillDefault) {
+    const next = await prisma.address.findFirst({
+      where: { customerId: user.customerId },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (next) await prisma.address.update({ where: { id: next.id }, data: { isDefault: true } });
+  }
   return NextResponse.json({ ok: true });
 }

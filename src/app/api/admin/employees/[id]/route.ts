@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { adminHandler, AdminActionError } from '@/lib/admin-auth';
+import { adminHandler, AdminActionError, isSuperAdmin, countEffectiveAdmins } from '@/lib/admin-auth';
 import { prisma } from '@/lib/prisma';
-import { hashPassword } from '@/lib/auth';
+import { hashPassword, bumpSessionVersion } from '@/lib/auth';
+import { getRolePermissions, forbiddenGrants } from '@/lib/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,21 +19,57 @@ const schema = z.object({
 
 export const PATCH = adminHandler('users.manage', async ({ admin, req }) => {
   const id = new URL(req.url).pathname.split('/').filter(Boolean).pop()!;
-  const existing = await prisma.user.findUnique({ where: { id } });
+  const existing = await prisma.user.findUnique({
+    where: { id },
+    include: { role: true },
+  });
   if (!existing) throw new AdminActionError('Employee not found', 'NOT_FOUND', 404);
+
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: 'Validation failed' }, { status: 422 });
+  if (!parsed.success) return NextResponse.json({ error: 'Validation failed', issues: parsed.error.issues }, { status: 422 });
   const d = parsed.data;
 
-  // Guard against removing the last active admin.
-  if (existing.roleId && d.roleId !== existing.roleId) {
-    const oldRole = await prisma.role.findUnique({ where: { id: existing.roleId } });
-    if (oldRole?.name === 'ADMIN') {
-      const admins = await prisma.user.count({ where: { role: { name: 'ADMIN' }, isActive: true, id: { not: id } } });
-      if (admins === 0) return NextResponse.json({ error: 'At least one active admin must remain' }, { status: 409 });
+  const role = await prisma.role.findUnique({ where: { id: d.roleId } });
+  if (!role) throw new AdminActionError('Role not found', 'NOT_FOUND', 404);
+
+  // Self-protection: an employee may not disable, suspend, or demote themselves
+  // — that would lock them out and is a common footgun.
+  const isSelf = existing.id === admin.id;
+  if (isSelf && d.status !== 'ACTIVE') {
+    return NextResponse.json({ error: 'You cannot disable your own account', code: 'SELF_DISABLE' }, { status: 409 });
+  }
+  if (isSelf && d.roleId !== existing.roleId) {
+    return NextResponse.json({ error: 'You cannot change your own role', code: 'SELF_ROLE' }, { status: 409 });
+  }
+
+  // Privilege escalation guard: only a super-admin may move an account onto a
+  // role carrying permissions the actor does not hold.
+  if (!isSuperAdmin(admin)) {
+    const rolePerms = await getRolePermissions(role.id);
+    const forbidden = forbiddenGrants(admin, rolePerms);
+    if (forbidden.length) {
+      return NextResponse.json(
+        { error: 'You cannot assign a role with permissions you do not hold', code: 'PRIVILEGE_ESCALATION', permissions: forbidden },
+        { status: 403 },
+      );
     }
   }
+
+  // Guard against removing the last administrator who can still manage
+  // employees. Counting by role name is not enough — a DENY override can strip
+  // `users.manage` from an admin — so this measures the resolved permission set.
+  const losingAdmin = existing.role?.name === 'ADMIN' && (d.roleId !== existing.roleId || d.status !== 'ACTIVE');
+  if (losingAdmin) {
+    const remaining = await countEffectiveAdmins(id);
+    if (remaining === 0) {
+      return NextResponse.json({ error: 'At least one administrator able to manage employees must remain', code: 'LAST_ADMIN' }, { status: 409 });
+    }
+  }
+
+  const statusChanged = existing.status !== d.status || existing.isActive !== (d.status === 'ACTIVE');
+  const roleChanged = existing.roleId !== d.roleId;
+  const passwordChanged = Boolean(d.password);
 
   await prisma.user.update({
     where: { id },
@@ -44,9 +81,24 @@ export const PATCH = adminHandler('users.manage', async ({ admin, req }) => {
       roleId: d.roleId,
       status: d.status,
       isActive: d.status === 'ACTIVE',
-      ...(d.password ? { passwordHash: await hashPassword(d.password) } : {}),
+      ...(passwordChanged ? { passwordHash: await hashPassword(d.password) } : {}),
     },
   });
-  await prisma.auditLog.create({ data: { userId: admin.id, action: 'employee.update', entity: 'User', entityId: id, metadata: {} } });
+
+  // Any of these invalidates live sessions for the affected employee, so a
+  // disabled account cannot be used with an old cookie.
+  if (statusChanged || roleChanged || passwordChanged) {
+    await bumpSessionVersion(id);
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      userId: admin.id,
+      action: 'employee.update',
+      entity: 'User',
+      entityId: id,
+      metadata: { roleChanged, statusChanged, passwordChanged, newStatus: d.status } as never,
+    },
+  });
   return NextResponse.json({ ok: true, id });
 });

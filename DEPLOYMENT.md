@@ -1,0 +1,259 @@
+# Deployment — Attention Modest Fashion
+
+Production deployment target: **cPanel → "Setup Node.js App" (Application Manager)**,
+MySQL 8 / MariaDB 10.4+, Node.js 20 LTS or newer.
+
+The app is a single Next.js 15 (App Router) server. There is no Docker, no
+Kubernetes, and no external service dependency beyond the MySQL database, so it
+runs on standard shared/dedicated cPanel hosting.
+
+---
+
+## 1. Server prerequisites
+
+| Item | Value |
+| --- | --- |
+| Node.js version | `>= 20.9.0` (set **20.x LTS** in cPanel) |
+| Application root | e.g. `/home/<cpanel_user>/attention` |
+| Application URL | `https://attention-modestfashion.com` |
+| Startup file | `server.js` (see below) or `node_modules/next/dist/bin/next` |
+| Database | MySQL 8 / MariaDB 10.4+ |
+
+### MySQL
+
+1. In cPanel → **MySQL Databases**, create a database and a user, and grant the
+   user all privileges on it.
+2. Note the host — on cPanel it is usually `localhost` (port `3306`).
+3. The connection string format is
+   `mysql://USER:PASSWORD@HOST:PORT/DATABASE`.
+
+---
+
+## 2. Environment variables
+
+Set these in cPanel → **Setup Node.js App → Environment Variables**. Do **not**
+commit real values; `.env` is git-ignored.
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | yes | `mysql://user:pass@localhost:3306/attention` |
+| `AUTH_SECRET` | yes | Long random value. `openssl rand -base64 48` |
+| `NEXT_PUBLIC_SITE_URL` | yes | `https://attention-modestfashion.com` (no trailing slash) |
+| `APP_URL` | recommended | Absolute origin used to build payment return/callback URLs, e.g. `https://attention-modestfashion.com`. Defaults to the live domain if omitted. |
+| `PORT` | no | Provided by cPanel/Passenger automatically |
+| `TAPP_ENV` | no | `sandbox` or `live` |
+| `TAPP_BASE_URL` | no | TAPP API base, e.g. `https://api.tapp.sa` |
+| `TAPP_MERCHANT_ID` | no | TAPP merchant id (or set in Admin → Settings → Payments) |
+| `TAPP_API_KEY` | no | TAPP API key |
+| `TAPP_WEBHOOK_SECRET` | no | TAPP webhook signing secret |
+| `BENEFIT_ALIAS` / `BENEFIT_ACCOUNT_NAME` / `BENEFIT_ACCOUNT_NUMBER` | no | BenefitPay details (or admin setting) |
+| `BANK_NAME` / `BANK_IBAN` / `BANK_ACCOUNT_NAME` | no | Bank transfer details (or admin setting) |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | seeding only | Used by `npm run db:seed` |
+
+Payment credentials can be supplied either through the environment or the Admin
+UI. Values entered in **Admin → Settings → Payments → TAPP configuration** take
+precedence over the environment variables, and are stored server-side only.
+
+---
+
+## 3. Build & start commands
+
+In the cPanel Node.js App configuration:
+
+| Field | Command |
+| --- | --- |
+| Install / NPM install | `npm ci` |
+| Build | `npm run build` |
+| Start (Application startup file) | `server.js` |
+
+`npm ci` triggers `postinstall` → `prisma generate`, which is required before
+`next build`.
+
+Create `server.js` in the application root (cPanel/Passenger starts this file
+rather than `next start`):
+
+```js
+// cPanel / Passenger entrypoint.
+const { createServer } = require('http');
+const next = require('next');
+
+const port = process.env.PORT || 3000;
+const app = next({ dev: false, dir: __dirname });
+const handle = app.getRequestHandler();
+
+app.prepare().then(() => {
+  createServer((req, res) => handle(req, res)).listen(port);
+});
+```
+
+Restart the application after every deploy from **Setup Node.js App → Restart**.
+
+---
+
+## 4. Database schema
+
+The schema is managed with Prisma. A committed baseline migration lives in
+`prisma/migrations/0_init`.
+
+**Fresh database** (new install):
+
+```bash
+npx prisma migrate deploy   # creates the schema from the committed migration
+npm run db:seed             # creates roles, permissions, the admin user and demo data
+```
+
+**Existing database** that was already created with `prisma db push` (baseline
+it once, then use migrations thereafter):
+
+```bash
+npx prisma migrate resolve --applied 0_init
+```
+
+After every future schema change, generate a new migration locally with
+`npx prisma migrate dev` and commit it; production only ever runs
+`npx prisma migrate deploy`.
+
+If the database user lacks `CREATE DATABASE` rights, create the database in
+cPanel first and only run `migrate deploy` (never `migrate dev` on production).
+
+> **Fresh install note.** A database that has just been migrated has no
+> currencies configured yet. The storefront detects this and falls back to BHD
+> so it still renders; running `npm run db:seed` (or adding currencies in
+> Admin → Settings) activates the full multi-currency selector.
+
+---
+
+## 5. Static & uploaded media
+
+- Product images served from `/media/...` are static assets in
+  `public/media/`. Deploy them with the release.
+- Runtime uploads (if enabled) are written under `public/uploads/`, which is
+  git-ignored. Ensure the directory exists and is writable by the app user, and
+  include it in your backup routine.
+- Next.js image optimization needs write access to the `.next` cache directory.
+
+---
+
+## 6. SSL, proxy & rewrite requirements
+
+- Terminate TLS at cPanel/AutoSSL and force HTTPS. The app already sends
+  `Strict-Transport-Security`.
+- The `/api/webhooks/tapp` endpoint must be reachable over HTTPS from TAPP.
+  Point the TAPP dashboard webhook at
+  `https://attention-modestfashion.com/api/webhooks/tapp`.
+- No custom rewrite rules are needed; all routing is handled by Next.js
+  middleware and the App Router.
+
+### Rate limiting & proxy trust (required)
+
+`X-Forwarded-For` is client-controlled. The app no longer trusts the left-most
+value (which any client could rotate to bypass rate limiting); it trusts only the
+hops appended by our own proxies. Set **`TRUSTED_PROXY_COUNT`** to the number of
+reverse proxies sitting in front of the Node process:
+
+| Topology | `TRUSTED_PROXY_COUNT` |
+| --- | --- |
+| cPanel/Passenger → Node (Passenger is the only ingress) | `1` |
+| nginx → Node | `1` |
+| CDN → nginx → Node | `2` |
+| No proxy at all | `0` (unset) |
+
+**nginx must *overwrite* `X-Forwarded-For`, not append a client value.** The
+`$proxy_add_x_forwarded_for` variable appends the peer address to whatever the
+client sent; because the app counts from the right this is still safe, but
+`X-Real-IP` is set explicitly as a fallback. Add to the `server`/`location`
+block:
+
+```nginx
+# Tell the app how many proxies to trust (must match TRUSTED_PROXY_COUNT).
+# Set the same value in the app environment.
+
+# Overwrite the header with the address nginx actually saw. Never forward a
+# client-supplied X-Forwarded-For verbatim.
+proxy_set_header X-Real-IP        $remote_addr;
+proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header Host             $host;
+```
+
+If a CDN sits in front of nginx, its address range should be trusted and
+`TRUSTED_PROXY_COUNT` set to `2` (CDN hop + nginx hop). Do not set it higher than
+the real number of proxies — each extra trusted hop lets a client spoof one more
+position.
+
+> Changing the nginx config or `TRUSTED_PROXY_COUNT` on the production host is an
+> operations action and requires host access and authorization; it is **not**
+> performed by the application code.
+
+---
+
+## 7. Cron / scheduled tasks
+
+None are required for the storefront. Optional:
+
+- A cron hitting `GET /api/health` every 5 minutes for uptime monitoring.
+
+---
+
+## 8. Post-deploy checklist
+
+1. `GET /api/health` returns `{"status":"ok","database":"up"}`.
+2. Sign in to `https://<domain>/en/admin` with the seeded admin account and
+   immediately change the password (Admin → Employees) and set
+   `SEED_ADMIN_PASSWORD` out of the environment if not needed.
+3. Configure store details, currencies, shipping methods and payment methods in
+   Admin → Settings.
+4. Verify checkout with each enabled method; confirm the flow is rejected with a
+   clear message when a method is disabled.
+5. Confirm TAPP webhook deliveries arrive and are accepted in the Payment log
+   (unsigned requests must be rejected with HTTP 401).
+
+---
+
+## 9. Deployment verification (owned by engineering)
+
+The following were verified locally in the final deployment-QA pass. They can be
+re-run on the host after deploy.
+
+**Commands**
+
+```bash
+npm ci                 # clean install (postinstall runs prisma generate)
+npx prisma migrate deploy
+npm run typecheck      # tsc --noEmit
+npm run lint           # next lint
+npm test               # vitest, 66 tests
+npm run build          # next build
+npm run start          # local production server
+```
+
+**Verified**
+
+| Area | Result |
+| --- | --- |
+| Clean install + production build | passes, no build warnings |
+| Typecheck / lint / tests | 0 errors, 0 warnings, 66/66 pass |
+| Schema vs migration | `prisma migrate diff` reports no difference |
+| Health endpoint | `{"status":"ok","database":"up"}` |
+| Storefront routes (EN + AR) | `/`, `/shop`, `/search`, `/collections`, `/about`, `/size-guide`, `/cart`, `/checkout`, product pages — all 200 |
+| Locale attributes | `<html lang="en" dir="ltr">` / `<html lang="ar" dir="rtl">` |
+| Unconfigured currency | storefront renders with BHD fallback (regression test added) |
+| Cart flow | add / update qty / valid + invalid coupon all correct |
+| Checkout (COD, Bank Transfer) | order created, totals correct, stock decremented |
+| Idempotency | replayed checkout key returns the same order (no duplicate) |
+| Disabled payment method | checkout rejected with `DISABLED` |
+| Admin (RBAC) | anonymous + customer → 401; admin → authorized |
+| TAPP webhook | unsigned request rejected `401 Invalid signature` |
+| Rate limiting | sign-in burst returns 429 after the limit |
+| SEO | canonical, hreflang (en/ar/x-default), sitemap, robots, Product/Offer/BreadcrumbList/Organization/WebSite JSON-LD |
+| Security headers | CSP, HSTS, X-Frame-Options, Referrer-Policy, Permissions-Policy present |
+
+**Owner action still required (cannot be automated)**
+
+- Provide cPanel + production MySQL access to actually deploy.
+- Point DNS/TLS at the host and set `NEXT_PUBLIC_SITE_URL` / `APP_URL`.
+- Set a real `AUTH_SECRET`, then seed and change the admin password.
+- Enter TAPP credentials (or keep TAPP disabled) and configure currencies,
+  shipping and payment methods in Admin.
+
+

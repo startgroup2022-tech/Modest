@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { getDictionary } from '@/i18n/dictionaries';
 import { type Locale } from '@/i18n/config';
 import { SignOutButton } from '@/components/account/SignOutButton';
+import { PasswordForm } from '@/components/account/PasswordForm';
 import { CurrencySwitcher, LocaleSwitcher } from '@/components/layout/Switchers';
 import { getActiveCurrencies } from '@/lib/currency';
 
@@ -49,6 +50,12 @@ export default async function AccountSettingsPage({ params }: { params: Promise<
             label={dict.common.currency}
           />
         </div>
+      </section>
+
+      <section>
+        <h3 className="eyebrow mb-4">{dict.account.changePassword}</h3>
+        <p className="mb-5 text-small text-ink-muted">{dict.account.changePasswordBody}</p>
+        <PasswordForm dict={dict} />
       </section>
 
       <section>

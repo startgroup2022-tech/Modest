@@ -52,6 +52,9 @@ export default async function AdminOrdersPage({
     next.set('page', String(page));
     return `${href('orders')}?${next.toString()}`;
   };
+  const exportParams = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) if (v && k !== 'page') exportParams.set(k, v);
+  const exportHref = `/api/admin/orders/export${exportParams.size ? `?${exportParams.toString()}` : ''}`;
 
   const rangeOptions = [
     { value: 'last30', label: dict.common.last30 },
@@ -71,9 +74,9 @@ export default async function AdminOrdersPage({
         subtitle={dict.orders.subtitle}
         actions={
           <>
-            <Link href={href('reports/orders')} className="adm-btn-outline">
+            <a href={exportHref} className="adm-btn-outline">
               {dict.common.exportExcel}
-            </Link>
+            </a>
             <Link href={href('orders/quick')} className="adm-btn-primary">
               + {dict.orders.placeOrder}
             </Link>

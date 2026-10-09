@@ -5,16 +5,19 @@ import { getCartView, clearCart } from '@/lib/cart';
 import { getSelectedCurrency } from '@/lib/currency';
 import { checkoutSchema } from '@/lib/validation';
 import { createOrder, resolveCartLines, CheckoutError } from '@/lib/orders';
+import { computeTotals } from '@/lib/money';
+import { findCouponByCode, buildCouponLines, evaluateCoupon } from '@/lib/coupons';
+import { getQualifyingCount } from '@/lib/membership-db';
+import { hashGuestEmail } from '@/lib/tokens';
 import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
 import type { CouponLike } from '@/lib/money';
+import { clientIp } from '@/lib/client-ip';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_COUPON_INCLUDE = { id: true, code: true, discountType: true, valueBhd: true, minOrderBhd: true, maxDiscountBhd: true, usageLimit: true, usedCount: true, startsAt: true, expiresAt: true, isActive: true } as const;
-
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
+  const ip = clientIp(req);
   const limit = rateLimit(`checkout:${ip}`, 12, 60_000);
   if (!limit.ok) return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 });
 
@@ -33,6 +36,7 @@ export async function POST(req: NextRequest) {
   }
 
   const user = await getCurrentUser();
+  const currency = await getSelectedCurrency();
 
   // Replay a previous submission before touching the cart. A double-tap or
   // network retry clears the bag on the first request, so without this the
@@ -61,48 +65,79 @@ export async function POST(req: NextRequest) {
   }
 
   // Coupon is validated server-side against the database, never trusted from the client.
+  // The evaluator applies scope, window, usage, per-customer and membership rules.
   let coupon: (CouponLike & { id: string }) | null = null;
   const couponCode = parsed.data.couponCode?.trim().toUpperCase();
   if (couponCode) {
-    const now = new Date();
-    const row = await prisma.coupon.findUnique({ where: { code: couponCode }, select: VALID_COUPON_INCLUDE });
-    const valid =
-      row &&
-      row.isActive &&
-      (!row.startsAt || row.startsAt <= now) &&
-      (!row.expiresAt || row.expiresAt >= now) &&
-      (row.usageLimit == null || row.usedCount < row.usageLimit);
-    if (valid && row) {
-      coupon = {
-        id: row.id,
-        discountType: row.discountType,
-        valueBhd: Number(row.valueBhd),
-        minOrderBhd: row.minOrderBhd != null ? Number(row.minOrderBhd) : null,
-        maxDiscountBhd: row.maxDiscountBhd != null ? Number(row.maxDiscountBhd) : null,
-      };
-    } else {
+    const row = await findCouponByCode(couponCode);
+    if (!row) {
       return NextResponse.json({ error: 'This promo code is not valid', field: 'couponCode' }, { status: 400 });
     }
-  }
-
-  // Shipping is chosen server-side from the DB by code; the price is never client-supplied.
-  let shippingBhd = 0;
-  if (parsed.data.shippingMethodCode) {
-    const method = await prisma.shippingMethod.findFirst({
-      where: { code: parsed.data.shippingMethodCode, isActive: true },
+    const couponLines = await buildCouponLines(
+      cart.items.map((i) => ({ productId: i.productId, unitPriceBhd: i.unitPriceBhd, quantity: i.quantity })),
+    );
+    const membershipCount = user?.customerId ? await getQualifyingCount(user.customerId) : null;
+    const evaluation = await evaluateCoupon(row, couponLines, {
+      customerId: user?.customerId ?? null,
+      guestEmailHash: user?.customerId ? null : hashGuestEmail(parsed.data.email),
+      membershipCount,
+      currencyCode: currency.code,
     });
-    if (method) shippingBhd = Number(method.priceBhd);
-  } else {
-    const fallback = await prisma.shippingMethod.findFirst({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } });
-    shippingBhd = fallback ? Number(fallback.priceBhd) : 0;
+    if (!evaluation.ok || !evaluation.coupon) {
+      const message =
+        evaluation.reason === 'MIN_ORDER'
+          ? 'This promo code needs a larger order'
+          : evaluation.reason === 'PER_CUSTOMER_LIMIT'
+            ? 'You have already used this promo code'
+            : evaluation.reason === 'MIN_MEMBERSHIP'
+              ? 'This promo code is not available for your account'
+              : 'This promo code is not valid';
+      return NextResponse.json({ error: message, field: 'couponCode' }, { status: 400 });
+    }
+    coupon = evaluation.coupon;
   }
 
-  const currency = await getSelectedCurrency();
+  // Shipping is chosen server-side from the DB by code; the price is never
+  // client-supplied, and a code that is not an active method is rejected rather
+  // than silently downgraded to a possibly-cheaper fallback.
+  let shippingBhd = 0;
+  const requestedShipping = parsed.data.shippingMethodCode?.trim();
+  const shippingMethods = await prisma.shippingMethod.findMany({
+    where: { isActive: true },
+    orderBy: { sortOrder: 'asc' },
+  });
+  if (requestedShipping) {
+    const method = shippingMethods.find((m) => m.code === requestedShipping);
+    if (!method) {
+      return NextResponse.json(
+        { error: 'The selected delivery method is not available', code: 'INVALID_SHIPPING', field: 'shippingMethodCode' },
+        { status: 400 },
+      );
+    }
+    shippingBhd = Number(method.priceBhd);
+  } else if (shippingMethods.length) {
+    shippingBhd = Number(shippingMethods[0].priceBhd);
+  }
 
   try {
     const lines = await resolveCartLines(
       cart.items.map((i) => ({ productId: i.productId, variantId: i.variantId, quantity: i.quantity })),
     );
+
+    // Recompute the order total server-side before honouring the chosen method,
+    // so the enabled flag and any order-value limits cannot be bypassed by a
+    // client that simply posts a different method.
+    const previewTotals = computeTotals(
+      lines.map((l) => ({ unitPriceBhd: l.unitPriceBhd, quantity: l.quantity, lineTotalBhd: l.lineTotalBhd })),
+      coupon,
+      shippingBhd,
+    );
+    const { getPaymentConfigs, assertMethodAllowed } = await import('@/lib/payment-config');
+    const methodConfigs = await getPaymentConfigs();
+    const gate = assertMethodAllowed(methodConfigs[parsed.data.paymentMethod], previewTotals.totalBhd);
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.message, code: gate.code, field: 'paymentMethod' }, { status: 400 });
+    }
 
     const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? req.nextUrl.origin;
     const order = await createOrder({
@@ -115,6 +150,7 @@ export async function POST(req: NextRequest) {
       coupon,
       idempotencyKey,
       baseUrl,
+      guestEmailHash: user?.customerId ? null : hashGuestEmail(parsed.data.email),
     });
 
     await clearCart();
@@ -137,7 +173,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     if (err instanceof CheckoutError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 400 });
+      const isMeasurements =
+        err.message.startsWith('Please choose your measurements') || err.message.startsWith('A piece is missing');
+      return NextResponse.json(
+        { error: err.message, code: err.code, field: isMeasurements ? 'cart' : undefined },
+        { status: 400 },
+      );
     }
     console.error('[checkout] failed', err);
     return NextResponse.json({ error: 'We could not place your order. Please try again.' }, { status: 500 });

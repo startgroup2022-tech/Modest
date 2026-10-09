@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { clsx } from 'clsx';
 import { useStore } from '@/components/providers/StoreProvider';
+import type { CartPieceInput } from '@/components/providers/StoreProvider';
 import { HeartIcon, RulerIcon, TruckIcon, ArrowRight } from '@/components/ui/icons';
+import { MeasurementSelector, type CutView } from '@/components/product/MeasurementSelector';
 import type { Dict } from '@/i18n/dictionaries';
 import type { Locale } from '@/i18n/config';
 
@@ -25,6 +27,7 @@ export function BuyPanel({
   madeToOrder,
   leadTimeMin,
   leadTimeMax,
+  cut,
   dict,
   locale,
   sizeGuideHref,
@@ -35,6 +38,7 @@ export function BuyPanel({
   madeToOrder: boolean;
   leadTimeMin: number;
   leadTimeMax: number;
+  cut?: CutView | null;
   dict: Dict;
   locale: Locale;
   sizeGuideHref: string;
@@ -44,9 +48,12 @@ export function BuyPanel({
   const [selected, setSelected] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<'add' | 'buy' | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [pieces, setPieces] = useState<(CartPieceInput | null)[]>([null]);
 
   const inWishlist = wishlist.includes(productId);
-  const requiresSize = variants.length > 0;
+  const usesCut = Boolean(cut && cut.fields.length > 0 && cut.sizes.length > 0);
+  const requiresSize = !usesCut && variants.length > 0;
   const active = useMemo(() => variants.find((v) => v.id === selected) ?? null, [variants, selected]);
   const soldOut = active ? active.stockStatus === 'OUT_OF_STOCK' : false;
   const lowStock = active ? active.stockStatus === 'LOW_STOCK' || (active.stock > 0 && active.stock <= 3) : false;
@@ -56,8 +63,44 @@ export function BuyPanel({
     return selected;
   };
 
+  function changeQuantity(next: number) {
+    const clamped = Math.max(1, Math.min(5, next));
+    setQuantity(clamped);
+    setPieces((prev) => {
+      const copy = prev.slice(0, clamped);
+      while (copy.length < clamped) copy.push(prev[prev.length - 1] ?? null);
+      return copy;
+    });
+  }
+
+  function setPiece(index: number, piece: CartPieceInput | null) {
+    setPieces((prev) => {
+      const next = [...prev];
+      next[index] = piece;
+      return next;
+    });
+  }
+
   const submit = async (mode: 'add' | 'buy') => {
     setLocalError(null);
+    if (usesCut) {
+      if (pieces.length !== quantity || pieces.some((p) => p === null)) {
+        setLocalError(dict.product.measurementsRequired);
+        return;
+      }
+      setSubmitting(mode);
+      try {
+        await addItem(productId, null, quantity, pieces as CartPieceInput[]);
+        if (mode === 'buy') router.push(`/${locale}/checkout`);
+        else setFlash(dict.cart.added);
+      } catch {
+        setLocalError(dict.errors.generic);
+      } finally {
+        setSubmitting(null);
+      }
+      return;
+    }
+
     const variantId = resolveVariantId();
     if (requiresSize && !variantId) {
       setLocalError(dict.product.selectSize);
@@ -85,7 +128,55 @@ export function BuyPanel({
 
   return (
     <div className="mt-7">
-      {requiresSize ? (
+      {usesCut && cut ? (
+        <>
+          <div className="flex items-center justify-between">
+            <span className="eyebrow">{dict.product.quantity}</span>
+            <div className="inline-flex items-center border border-line">
+              <button
+                type="button"
+                aria-label={dict.common.decreaseQty}
+                onClick={() => changeQuantity(quantity - 1)}
+                className="px-3.5 py-2 text-ink-muted hover:text-ink"
+              >
+                −
+              </button>
+              <span className="w-8 text-center text-small tabular-nums">{quantity}</span>
+              <button
+                type="button"
+                aria-label={dict.common.increaseQty}
+                onClick={() => changeQuantity(quantity + 1)}
+                className="px-3.5 py-2 text-ink-muted hover:text-ink"
+              >
+                +
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 text-caption text-ink-faint">{dict.product.perPieceMeasurements}</p>
+          <div className="mt-4 space-y-6">
+            {Array.from({ length: quantity }).map((_, i) => (
+              <div key={i} className="border border-line p-4">
+                <p className="eyebrow mb-1">
+                  {dict.product.perPieceMeasurements} {i + 1} / {quantity}
+                </p>
+                <MeasurementSelector
+                  cut={cut}
+                  locale={locale}
+                  sizeGuideHref={sizeGuideHref}
+                  onChange={(piece) => setPiece(i, piece)}
+                  dict={{
+                    size: dict.product.size,
+                    sizeGuide: dict.nav.sizeGuide,
+                    customMeasurements: dict.product.customMeasurements,
+                    readySize: dict.product.readySize,
+                    required: dict.product.measurementsRequired,
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        </>
+      ) : requiresSize ? (
         <div>
           <div className="flex items-center justify-between">
             <span className="eyebrow">{dict.product.size}</span>

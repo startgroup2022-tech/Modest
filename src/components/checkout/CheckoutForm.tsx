@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 import { useStore } from '@/components/providers/StoreProvider';
 import { Price } from '@/components/ui/Price';
 import { LockIcon, CheckIcon } from '@/components/ui/icons';
+import { LineMeasurements } from '@/components/cart/LineMeasurements';
 import { formatMoney, roundBhd } from '@/lib/utils';
 import type { CartLineView } from '@/lib/cart';
 import type { Dict } from '@/i18n/dictionaries';
@@ -70,7 +71,7 @@ export function CheckoutForm({
   const [shippingCode, setShippingCode] = useState(shipping[0]?.code ?? '');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(methods[0]?.method ?? 'COD');
   const [coupon, setCoupon] = useState('');
-  const [couponState, setCouponState] = useState<{ status: 'idle' | 'applied' | 'invalid' | 'min'; discountBhd: number; freeShipping: boolean }>(
+  const [couponState, setCouponState] = useState<{ status: 'idle' | 'applied' | 'invalid' | 'min'; discountBhd: number; freeShipping: boolean; reason?: 'couponMinOrder' | 'couponUsed' | 'couponMembership' | 'couponInvalid' }>(
     { status: 'idle', discountBhd: 0, freeShipping: false },
   );
   const [acceptsTerms, setAcceptsTerms] = useState(false);
@@ -107,13 +108,26 @@ export function CheckoutForm({
       const res = await fetch('/api/coupon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: coupon }),
+        body: JSON.stringify({ code: coupon, email: form.email || undefined }),
       });
       const data = (await res.json()) as { ok: boolean; error?: string; discountBhd?: number; freeShipping?: boolean };
       if (data.ok) {
         setCouponState({ status: 'applied', discountBhd: data.discountBhd ?? 0, freeShipping: Boolean(data.freeShipping) });
       } else {
-        setCouponState({ status: data.error === 'couponMinOrder' ? 'min' : 'invalid', discountBhd: 0, freeShipping: false });
+        const reason =
+          data.error === 'couponMinOrder'
+            ? 'couponMinOrder'
+            : data.error === 'couponUsed'
+              ? 'couponUsed'
+              : data.error === 'couponMembership'
+                ? 'couponMembership'
+                : 'couponInvalid';
+        setCouponState({
+          status: reason === 'couponMinOrder' ? 'min' : 'invalid',
+          discountBhd: 0,
+          freeShipping: false,
+          reason,
+        });
       }
     } catch {
       setCouponState({ status: 'invalid', discountBhd: 0, freeShipping: false });
@@ -258,6 +272,11 @@ export function CheckoutForm({
               <legend className="mb-3 text-caption uppercase tracking-[0.12em] text-ink-muted">
                 {dict.cart.deliveryMethod}
               </legend>
+              {fieldError === 'shippingMethodCode' ? (
+                <p className="mb-3 text-small text-danger" role="alert">
+                  {dict.checkout.invalidShipping}
+                </p>
+              ) : null}
               <div className="space-y-2">
                 {shipping.map((s) => (
                   <label
@@ -345,9 +364,14 @@ export function CheckoutForm({
         </section>
 
         {error ? (
-          <p role="alert" className="border border-danger/30 bg-danger/5 px-4 py-3 text-small text-danger">
-            {error}
-          </p>
+          <div role="alert" className="border border-danger/30 bg-danger/5 px-4 py-3 text-small text-danger">
+            <p>{error}</p>
+            {fieldError === 'cart' ? (
+              <Link href={`/${locale}/cart`} className="mt-2 inline-block underline underline-offset-4">
+                {dict.util.cart}
+              </Link>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -365,6 +389,12 @@ export function CheckoutForm({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-small">{locale === 'ar' ? item.nameAr : item.nameEn}</p>
                 {item.size ? <p className="text-caption text-ink-faint">{item.size}</p> : null}
+                <LineMeasurements
+                  pieces={item.pieces}
+                  needsMeasurements={item.needsMeasurements}
+                  locale={locale}
+                  labels={{ measurements: dict.product.perPieceMeasurements, required: dict.product.measurementsRequired }}
+                />
               </div>
               <Price amountBhd={item.lineTotalBhd} locale={locale} className="text-small" />
             </li>
@@ -395,7 +425,11 @@ export function CheckoutForm({
                   ? dict.cart.couponApplied
                   : couponState.status === 'min'
                     ? dict.cart.couponMinOrder
-                    : dict.cart.couponInvalid}
+                    : couponState.reason === 'couponUsed'
+                      ? dict.cart.couponUsed
+                      : couponState.reason === 'couponMembership'
+                        ? dict.cart.couponMembership
+                        : dict.cart.couponInvalid}
               </p>
             ) : null}
           </div>

@@ -4,6 +4,8 @@ import { notFound } from 'next/navigation';
 import { getPage } from '@/lib/site';
 import { getDictionary } from '@/i18n/dictionaries';
 import { isLocale, type Locale } from '@/i18n/config';
+import { seoTitle } from '@/lib/seo';
+import { sanitizeHtml, htmlToText } from '@/lib/sanitize';
 import { EmptyState } from '@/components/ui/EmptyState';
 
 export async function generateMetadata({
@@ -16,10 +18,11 @@ export async function generateMetadata({
   const page = await getPage(slug);
   if (!page) return { title: 'Not found' };
   const title = locale === 'ar' ? page.titleAr : page.titleEn;
-  const body = (locale === 'ar' ? page.bodyAr : page.bodyEn).replace(/<[^>]*>/g, ' ').slice(0, 160);
+  const body = htmlToText(locale === 'ar' ? page.bodyAr : page.bodyEn).slice(0, 160);
   return {
-    title,
-    description: body,
+    title: seoTitle(locale === 'ar' ? page.metaTitleAr : page.metaTitleEn, title, locale),
+    description: (locale === 'ar' ? page.metaDescAr : page.metaDescEn) || body,
+    robots: page.noIndex ? { index: false, follow: false } : undefined,
     alternates: {
       canonical: `/${locale}/p/${slug}`,
       languages: { en: `/en/p/${slug}`, ar: `/ar/p/${slug}`, 'x-default': `/en/p/${slug}` },
@@ -61,7 +64,7 @@ export default async function ContentPage({
       </header>
 
       {body ? (
-        <div className="prose-luxe" dangerouslySetInnerHTML={{ __html: body }} />
+        <div className="prose-luxe" dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }} />
       ) : (
         <EmptyState title={dict.pages.empty} actionLabel={dict.common.goHome} actionHref={`/${locale}`} />
       )}

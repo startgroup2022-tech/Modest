@@ -31,8 +31,9 @@ export const getMyAddresses = cache(async (customerId: string) => {
   });
 });
 
-export const getMyMeasurement = cache(async (customerId: string) => {
-  return prisma.measurement.findFirst({
+/** All saved measurement profiles for a customer, default first. */
+export const getMyMeasurements = cache(async (customerId: string) => {
+  return prisma.measurement.findMany({
     where: { customerId },
     orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
   });

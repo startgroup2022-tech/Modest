@@ -36,7 +36,7 @@ export default async function PromotionsPage({ params }: { params: Promise<{ loc
     { key: 'ctaLabelEn', label: `${dict.content.ctaLabel} (EN)` },
     { key: 'ctaLabelAr', label: `${dict.content.ctaLabel} (AR)` },
     { key: 'ctaHref', label: dict.content.ctaHref },
-    { key: 'imageUrl', label: dict.content.image },
+    { key: 'imageUrl', label: dict.content.image, type: 'image' },
     { key: 'startsAt', label: p.startsAt, type: 'date' },
     { key: 'endsAt', label: p.expiresAt, type: 'date' },
     { key: 'isActive', label: dict.common.enabled, type: 'checkbox' },

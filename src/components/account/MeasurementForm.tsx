@@ -7,6 +7,9 @@ import type { Dict } from '@/i18n/dictionaries';
 import type { Locale } from '@/i18n/config';
 
 interface MeasurementRow {
+  id?: string;
+  name: string;
+  isDefault: boolean;
   unit: string;
   height: string;
   shoulder: string;
@@ -23,18 +26,33 @@ export function MeasurementForm({
   locale,
   dict,
   initial,
+  onSaved,
 }: {
   locale: Locale;
   dict: Dict;
   initial: MeasurementRow | null;
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const [form, setForm] = useState<MeasurementRow>(
-    initial ?? { unit: 'cm', height: '', shoulder: '', bust: '', waist: '', hip: '', sleeve: '', armhole: '', length: '', notes: '' },
+    initial ?? {
+      name: '',
+      isDefault: false,
+      unit: 'cm',
+      height: '',
+      shoulder: '',
+      bust: '',
+      waist: '',
+      hip: '',
+      sleeve: '',
+      armhole: '',
+      length: '',
+      notes: '',
+    },
   );
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  const fields: { key: keyof MeasurementRow; label: string }[] = [
+  const fields: { key: 'height' | 'shoulder' | 'bust' | 'waist' | 'hip' | 'sleeve' | 'armhole' | 'length'; label: string }[] = [
     { key: 'height', label: dict.sizeGuide.measureHeight.split('—')[0].trim() },
     { key: 'shoulder', label: dict.sizeGuide.measureShoulder.split('—')[0].trim() },
     { key: 'bust', label: dict.sizeGuide.measureBust.split('—')[0].trim() },
@@ -52,10 +70,13 @@ export function MeasurementForm({
       const res = await fetch('/api/account?kind=measurements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, create: !form.id }),
       });
       setStatus(res.ok ? 'saved' : 'error');
-      if (res.ok) router.refresh();
+      if (res.ok) {
+        onSaved?.();
+        router.refresh();
+      }
     } catch {
       setStatus('error');
     }
@@ -63,20 +84,46 @@ export function MeasurementForm({
 
   return (
     <form onSubmit={submit} className="space-y-6" noValidate>
-      <div className="flex items-center gap-4">
-        <span className="text-caption uppercase tracking-[0.12em] text-ink-muted">{locale === 'ar' ? 'الوحدة' : 'Unit'}</span>
-        <div className="inline-flex border border-line">
-          {(['cm', 'in'] as const).map((u) => (
-            <button
-              key={u}
-              type="button"
-              onClick={() => setForm((f) => ({ ...f, unit: u }))}
-              className={clsx('px-4 py-2 text-caption uppercase', form.unit === u ? 'bg-ink text-paper' : 'text-ink-muted')}
-            >
-              {u}
-            </button>
-          ))}
+      <div>
+        <label htmlFor="m-name" className="mb-2 block text-caption uppercase tracking-[0.12em] text-ink-muted">
+          {dict.account.measurementName}
+        </label>
+        <input
+          id="m-name"
+          type="text"
+          maxLength={60}
+          value={form.name}
+          onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
+          className="field"
+          placeholder={dict.account.measurementNamePlaceholder}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-6">
+        <div className="flex items-center gap-4">
+          <span className="text-caption uppercase tracking-[0.12em] text-ink-muted">{locale === 'ar' ? 'الوحدة' : 'Unit'}</span>
+          <div className="inline-flex border border-line">
+            {(['cm', 'in'] as const).map((u) => (
+              <button
+                key={u}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, unit: u }))}
+                className={clsx('px-4 py-2 text-caption uppercase', form.unit === u ? 'bg-ink text-paper' : 'text-ink-muted')}
+              >
+                {u}
+              </button>
+            ))}
+          </div>
         </div>
+        <label className="flex cursor-pointer items-center gap-3 text-small text-ink-muted">
+          <input
+            type="checkbox"
+            checked={form.isDefault}
+            onChange={(e) => setForm((s) => ({ ...s, isDefault: e.target.checked }))}
+            className="h-4 w-4 accent-ink"
+          />
+          {dict.account.setDefault}
+        </label>
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
