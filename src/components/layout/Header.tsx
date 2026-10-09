@@ -7,6 +7,7 @@ import { clsx } from 'clsx';
 import { Logo } from './BrandMark';
 import { BagIcon, CloseIcon, HeartIcon, MenuIcon, SearchIcon, UserIcon } from '@/components/ui/icons';
 import { useStore } from '@/components/providers/StoreProvider';
+import { splitCenteredNav } from '@/lib/header-nav';
 import type { Dict } from '@/i18n/dictionaries';
 import type { Locale } from '@/i18n/config';
 
@@ -65,8 +66,7 @@ export function Header({
 
   // Desktop balances the bar around a centred wordmark: the first three links
   // sit on one side, the remaining links plus the utility icons on the other.
-  const navLeft = primary.slice(0, 3);
-  const navRight = primary.slice(3);
+  const { left: navLeft, right: navRight } = splitCenteredNav(primary, 3);
 
   return (
     <>
